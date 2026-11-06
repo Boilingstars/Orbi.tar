@@ -1,0 +1,25 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: console/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      ORBI_MODEL: /models/ckpt_68120.zip
+      ORBI_ALT_MODEL: /models/ckpt_35714.zip
+    volumes:
+      - ../agent/runs/10_prior_smart_repair/checkpoints/ckpt_68120.zip:/models/ckpt_68120.zip:ro
+      - ../agent/runs/20260922-095910_P02_shift_revenue/checkpoints/ckpt_35714.zip:/models/ckpt_35714.zip:ro
+
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "72.56.96.196:80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+      - ./static:/usr/share/nginx/html/static:ro
+      - ./src:/usr/share/nginx/html/src:ro
+    depends_on:
+      - api

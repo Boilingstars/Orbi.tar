@@ -1,0 +1,68 @@
+#transfer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 6, 10, 0.62);
+  pointer-events: all;
+}
+
+#transfer-overlay[hidden] {
+  display: none !important;
+}
+
+body.is-transfer {
+  cursor: progress;
+}
+
+.transfer-box {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+
+.transfer-mark {
+  position: relative;
+  width: 28px;
+  height: 28px;
+}
+
+.transfer-label {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+}
+
+.transfer-ring,
+.transfer-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.transfer-ring {
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  border-top-color: var(--accent);
+  animation: transfer-spin 0.9s linear infinite;
+}
+
+.transfer-core {
+  inset: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  border-bottom-color: transparent;
+  animation: transfer-spin 1.6s linear infinite reverse;
+}
+
+@keyframes transfer-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transfer-ring,
+  .transfer-core {
+    animation: none;
+  }
+}

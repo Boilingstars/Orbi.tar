@@ -1,0 +1,39 @@
+n_sats: 4
+n_tasks: 24
+n_planes: 2
+altitude_km: 500.0
+inclination_deg: 51.6
+raan_offset_deg: 0.0
+min_elevation_deg: 10.0
+episode_orbits: 1.5
+max_queue: 4
+max_attempts: 12
+sim_dt: 5.0
+max_step_duration: 60.0
+max_defer_advance: 300.0
+min_work_slice_s: 10.0
+capability_dim: 4
+
+battery_capacity_ws: 720000.0
+battery_init_frac: [0.45, 0.95]
+panel_area_m2: 0.25
+panel_efficiency: 0.2
+solar_constant_w: 1362.0
+bus_power_w: 10.0
+
+duration_s: [90.0, 720.0]
+power_need_w: [20.0, 45.0]
+long_task_frac: 0.35
+
+ppo:
+  hidden: 128
+  learning_rate: 3.0e-4
+  n_steps: 1024
+  batch_size: 128
+  n_epochs: 10
+  gamma: 0.995
+  gae_lambda: 0.98
+  clip_range: 0.2
+  ent_coef: 0.02
+  vf_coef: 0.5
+  max_grad_norm: 0.5

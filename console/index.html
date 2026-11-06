@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orbi.tar</title>
+  <link rel="stylesheet" href="./static/css/console.css?v=orbit1">
+  <link rel="stylesheet" href="./static/css/splash.css">
+  <link rel="stylesheet" href="./static/css/transfer.css?v=resume-events">
+</head>
+<body>
+  <div id="splash-root">
+    <div class="splash">
+      <div class="splash-panel">
+        <h1>Orbi.tar</h1>
+        <p class="splash-lead">Автономное управление спутниковой группировкой</p>
+        <div class="splash-drop">
+          <p>Перетащите JSON сценария смены</p>
+          <span class="btn">Выбрать файл</span>
+        </div>
+        <div class="splash-actions">
+          <button type="button" class="btn" disabled>Загрузить демо-сценарий</button>
+          <button type="button" class="btn btn-go" disabled>Запустить смену</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="console" id="console" hidden>
+    <header class="zone zone-top" id="zone-top"></header>
+    <aside class="zone zone-left" id="zone-left"></aside>
+    <main class="zone zone-center" id="zone-center">
+      <div class="view-3d" id="zone-3d"></div>
+      <div class="timeline" id="zone-timeline"></div>
+    </main>
+    <aside class="zone zone-right" id="zone-right"></aside>
+    <footer class="zone zone-bottom" id="zone-bottom"></footer>
+  </div>
+  <div class="modal-root" id="modal-root"></div>
+  <div class="modal-root" id="event-modal-root"></div>
+  <div class="compare-root" id="compare-root" hidden></div>
+  <div id="transfer-overlay" hidden>
+    <div class="transfer-box" role="status" aria-live="polite" aria-label="Пересчёт политики">
+      <span class="transfer-mark">
+        <span class="transfer-ring"></span>
+        <span class="transfer-core"></span>
+      </span>
+      <span class="transfer-label">Пересчёт политики</span>
+    </div>
+  </div>
+  <script type="module" src="./static/js/app.js?v=orbit1"></script>
+</body>
+</html>

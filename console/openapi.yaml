@@ -1,0 +1,788 @@
+openapi: 3.0.3
+info:
+  title: Orbi.tar operator API
+  version: "1.0"
+  description: |
+    HTTP-контракт пульта. Nginx на порту 80 проксирует `/api/` в FastAPI.
+
+    **Откуда данные.** У каждого поля в схемах стоит `x-source`. Кратко:
+
+    | Источник | Что это |
+    |---|---|
+    | `scenario` | JSON смены `cosmo-B-ops-1.0`, проверка `sim/ops/resource_env.validate` |
+    | `kepler` | Картинка орбит `sim/kepler.KeplerWorld`, не физика смены |
+    | `physics` | Формулы организаторов `sim/ops/resource_env.py` + `operations.py` (не редактировать) |
+    | `repair` | Починка команд в `OpsEnv` до `Session.advance` (уникальность задания, кап downlink) |
+    | `ppo` | Сэмпл `MaskablePPO` / `OpsAttentionPolicy`; чекпоинт `ORBI_MODEL` |
+    | `critic` | Value-голова той же сети, тот же `forward`, что и действие |
+    | `heuristic` | Быстрая оценка кадра без сети: SOC, P3 в срок, не idle, нет новых просрочек |
+    | `operator` | События с пульта, схема `cosmo-B-events-1.0`, `Session.apply_event` на шаге k |
+
+    Политика приоритетов в консоли: `ORBI_MODEL` → сейчас
+    `agent/runs/10_prior_smart_repair/checkpoints/ckpt_68120.zip`
+    (копия `agent/models/ops_priority.zip`). Argmax не используем: почти всегда idle.
+
+    Вторая политика (нижняя сводка: выручка и выполненные задания):
+    `ORBI_ALT_MODEL` → `ckpt_35714.zip` прогона `20260922-095910_P02_shift_revenue`.
+    Считается при загрузке JSON и снова только после операторского события.
+
+    Развилка «сменить политику сейчас» (`POST /api/dispatch/whatif`): префикс
+    живого прогона до k, затем целевая сеть на 10 шагов. Живой кеш не трогает.
+    Чекпоинт по `goal`: priority → `ckpt_68120`, revenue → `ckpt_35714`.
+
+    Метки таймлайна и «Преимущество текущей политики» считает **клиент**
+    (`web/src/timeline-marks.json`, `q` кадра), не этот API.
+
+    Глобус не назначает задания.
+servers:
+  - url: /
+    description: Nginx (порт 80) или напрямую uvicorn :8000
+tags:
+  - name: scenario
+    description: Загрузка JSON смены. Источник — файл кейса, не сеть.
+  - name: kepler
+    description: Картинка орбит. Kepler, не charge и не окна связи из JSON.
+  - name: dispatch
+    description: Прогон политики. Действие и value — PPO; состояние — физика sim/ops.
+  - name: journal
+    description: Журнал смены cosmo-B-ops-result-1.0 для выгрузки.
+
+x-checkpoint:
+  env: ORBI_MODEL
+  file: /models/ckpt_68120.zip
+  host_path: agent/runs/10_prior_smart_repair/checkpoints/ckpt_68120.zip
+  run: 10_prior_smart_repair
+  goal: priority
+  policy: example.policy.OpsAttentionPolicy
+  sample: true
+
+x-checkpoint-alt:
+  env: ORBI_ALT_MODEL
+  file: /models/ckpt_35714.zip
+  host_path: agent/runs/20260922-095910_P02_shift_revenue/checkpoints/ckpt_35714.zip
+  run: 20260922-095910_P02_shift_revenue
+  goal: revenue
+  policy: example.policy.OpsAttentionPolicy
+  sample: true
+
+paths:
+  /api/scenario:
+    post:
+      tags: [scenario]
+      summary: Принять JSON смены
+      description: |
+        Тело — полный сценарий `cosmo-B-ops-1.0`. Проверка
+        `sim/ops/resource_env.validate` (алгоритм организаторов, не нейросеть).
+        В памяти один слот. Kepler-мир строится из числа КА (Walker-Delta,
+        500 км, наклонение 51.6°), орбиты не берутся из JSON.
+      operationId: loadScenario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Scenario"
+      responses:
+        "200":
+          description: Идентификаторы из JSON
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioLoaded"
+        "400":
+          description: validate() отверг JSON
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/orbits:
+    get:
+      tags: [kepler]
+      summary: Срез глобуса на одном шаге
+      description: |
+        Позиции и линии орбит — `orbi.kepler.KeplerWorld` (алгоритм двух тел).
+        Солнце ECEF — тот же мир, `eci_to_ecef`. Это не `environment.solar_w`
+        и не окна downlink/relay сценария.
+      operationId: getOrbits
+      parameters:
+        - name: step
+          in: query
+          schema: { type: integer, minimum: 0 }
+          description: Шаг смены. Время t = step × 300 с.
+      responses:
+        "200":
+          description: Срез
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrbitSlice"
+        "400":
+          description: Шаг вне смены
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Сценарий не загружен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/tracks:
+    get:
+      tags: [kepler]
+      summary: Поток позиций на всю смену
+      description: |
+        NDJSON. Те же Kepler-позиции, что `/api/orbits`, сразу на шаги 0…N.
+        Физика заряда и задания сюда не входят.
+      operationId: streamTracks
+      responses:
+        "200":
+          description: NDJSON Kepler
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: "#/components/schemas/TrackStream"
+        "409":
+          description: Сценарий не загружен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/dispatch:
+    get:
+      tags: [dispatch]
+      summary: Поток прогона политики
+      description: |
+        NDJSON кадров смены. Повтор того же JSON берётся из кэша процесса.
+
+        На каждом тике один `OpsAttentionPolicy.forward` (сэмпл, не argmax):
+        логиты → команда, та же голова → `value`. Затем `OpsEnv.step`:
+        repair и физика `sim/ops`. Кадр k — состояние при `env.k == k`.
+
+        Случайные учебные события выключены (`EventConfig.off()`).
+      operationId: streamDispatch
+      parameters:
+        - name: goal
+          in: query
+          schema:
+            type: string
+            enum: [priority, revenue, priorities, money]
+            default: priority
+          description: |
+            Цель награды OpsEnv, не физика. `priorities`/`money` с пульта
+            отображаются в `priority`/`revenue`. Кэш ключуется сценарием,
+            не целью.
+      responses:
+        "200":
+          description: NDJSON meta + frame
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: "#/components/schemas/DispatchStream"
+        "409":
+          description: Сценарий не загружен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/dispatch/resume:
+    post:
+      tags: [dispatch]
+      summary: Переиграть хвост с шага k
+      description: |
+        Тики 0…k−1 — сохранённые команды, сеть не вызывается.
+        На шаге k в `scripted_events` попадают уже принятые операторские
+        сообщения (`cosmo-B-events-1.0`, без UI-полей); `apply_event` до действия.
+        Сэмпл PPO только с k. Чекпоинт выбирается по `goal`:
+        `priority` → `ORBI_MODEL` (`ckpt_68120`), `revenue` → `ORBI_ALT_MODEL`
+        (`ckpt_35714`). Левая часть кривой на клиенте не откатывается.
+        Параллельно переигрывается противоположная политика; её поток —
+        `GET /api/dispatch/alt`.
+      operationId: resumeDispatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispatchResume"
+      responses:
+        "200":
+          description: NDJSON с кадра k (сначала обновлённый meta, если выросли jobs)
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: "#/components/schemas/DispatchStream"
+        "400":
+          description: Шаг вне смены или неверный events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Сценарий не загружен или прогон ещё не дошёл до k
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/dispatch/alt:
+    get:
+      tags: [dispatch]
+      summary: Поток второй политики
+      description: |
+        NDJSON компактных кадров `{type: alt, step, metrics}` той же смены,
+        но сэмпл `ORBI_ALT_MODEL` (`ckpt_35714`, цель revenue).
+        Стартует при загрузке JSON. Переигрывается только вместе с
+        `POST /api/dispatch/resume` после события оператора.
+        Клиент сравнивает выручку и число выполненных заданий с этим потоком
+        на том же шаге. Не физика Kepler.
+      operationId: streamAltDispatch
+      responses:
+        "200":
+          description: NDJSON alt_meta + alt
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: "#/components/schemas/AltDispatchStream"
+        "409":
+          description: Сценарий не загружен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/dispatch/whatif:
+    post:
+      tags: [dispatch]
+      summary: Развилка политики с шага k
+      description: |
+        Общий префикс 0…k−1 — команды живого прогона (сеть на префиксе не
+        вызывается). С шага k сэмпл целевой сети (`goal`: `priority` →
+        `ORBI_MODEL` / `ckpt_68120`, `revenue` → `ORBI_ALT_MODEL` /
+        `ckpt_35714`) на `horizon` шагов (по умолчанию 10) или до конца смены.
+        Живой кеш не останавливается и не обрезается. Ответ — NDJSON
+        `{type: whatif, step, horizon, stay_step, metrics}` на k…k+horizon.
+        x-source: ppo целевого чекпоинта + physics.
+      operationId: whatifDispatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DispatchWhatIf"
+      responses:
+        "200":
+          description: NDJSON whatif_meta + whatif
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: "#/components/schemas/WhatIfDispatchStream"
+        "400":
+          description: Шаг вне смены или неверный horizon/events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Сценарий не загружен или прогон ещё не дошёл до k
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/result:
+    get:
+      tags: [journal]
+      summary: Журнал прогона
+      description: |
+        `OpsEnv.journal()`, схема `cosmo-B-ops-result-1.0`. Команды — те, что
+        ушли в среду после repair (не сырой выход сети). Физика при replay
+        должна совпасть. Лимит 120 Мб.
+      operationId: getResult
+      responses:
+        "200":
+          description: Журнал
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpsResult"
+        "409":
+          description: Нет сценария или прогон ещё идёт
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: Больше 120 Мб
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+          x-source: api
+
+    Scenario:
+      type: object
+      description: Полный JSON смены. Источник — файл кейса / загрузка оператора.
+      required: [schema_version, meta, time, satellites, model, environment, jobs, failures]
+      properties:
+        schema_version:
+          type: string
+          enum: [cosmo-B-ops-1.0]
+          x-source: scenario
+        meta:
+          type: object
+          x-source: scenario
+        time:
+          type: object
+          x-source: scenario
+          properties:
+            step_s: { type: integer, enum: [300] }
+            steps: { type: integer, minimum: 1, maximum: 288 }
+        satellites:
+          type: array
+          x-source: scenario
+          items: { type: object }
+        model:
+          type: object
+          x-source: scenario
+          description: Пороги SOC, КПД, калибровка, лимит параллельных downlink.
+        environment:
+          type: object
+          x-source: scenario
+          description: По КА — solar_w, thermal_target_c, downlink_available, relay_available. Не Kepler.
+        jobs:
+          type: array
+          x-source: scenario
+          items: { $ref: "#/components/schemas/JobSpec" }
+        failures:
+          type: object
+          x-source: scenario
+
+    JobSpec:
+      type: object
+      x-source: scenario
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [downlink, relay] }
+        release_step: { type: integer }
+        deadline_step: { type: integer }
+        work_steps: { type: integer }
+        eligible_satellites:
+          type: array
+          items: { type: string }
+        priority: { type: integer, enum: [1, 2, 3] }
+        value_usd: { type: number }
+
+    ScenarioLoaded:
+      type: object
+      required: [scenario_id, satellites, jobs]
+      properties:
+        scenario_id:
+          type: string
+          x-source: scenario
+        satellites:
+          type: array
+          items: { type: string }
+          x-source: scenario
+        jobs:
+          type: array
+          items: { type: string }
+          x-source: scenario
+
+    OrbitSlice:
+      type: object
+      properties:
+        step:
+          type: integer
+          x-source: api
+        t_s:
+          type: number
+          description: step × 300
+          x-source: api
+        sun_ecef:
+          type: array
+          items: { type: number }
+          description: Единичный вектор солнца ECEF
+          x-source: kepler
+        satellites:
+          type: array
+          x-source: kepler
+          items:
+            type: object
+            properties:
+              id: { type: string, x-source: scenario }
+              lat: { type: number, x-source: kepler }
+              lon: { type: number, x-source: kepler }
+              alt_m: { type: number, x-source: kepler }
+              orbit:
+                type: array
+                description: 64 точки периода
+                x-source: kepler
+                items:
+                  type: object
+                  properties:
+                    lat: { type: number }
+                    lon: { type: number }
+                    alt_m: { type: number }
+
+    TrackStream:
+      description: Последовательность объектов, по одному в строке NDJSON
+      oneOf:
+        - $ref: "#/components/schemas/TrackMeta"
+        - $ref: "#/components/schemas/TrackFrame"
+        - $ref: "#/components/schemas/TrackOrbits"
+
+    TrackMeta:
+      type: object
+      properties:
+        type: { type: string, enum: [meta] }
+        ids:
+          type: array
+          items: { type: string }
+          x-source: scenario
+        steps:
+          type: integer
+          x-source: scenario
+
+    TrackFrame:
+      type: object
+      properties:
+        type: { type: string, enum: [frame] }
+        step: { type: integer, x-source: api }
+        sun:
+          type: array
+          items: { type: number }
+          x-source: kepler
+        pos:
+          type: array
+          description: "[lat, lon, alt_m] по КА, порядок как ids"
+          x-source: kepler
+          items:
+            type: array
+            items: { type: number }
+
+    TrackOrbits:
+      type: object
+      properties:
+        type: { type: string, enum: [orbits] }
+        path:
+          type: array
+          description: "По КА — 64 точки [lat, lon, alt_m]"
+          x-source: kepler
+          items:
+            type: array
+            items:
+              type: array
+              items: { type: number }
+
+    DispatchResume:
+      type: object
+      required: [step]
+      properties:
+        step:
+          type: integer
+          minimum: 0
+          description: Незаконченный шаг k. События применяются до действия k.
+          x-source: operator
+        goal:
+          type: string
+          enum: [priority, revenue, priorities, money]
+          description: Цель награды хвоста
+          x-source: operator
+        events:
+          type: array
+          description: Все уже принятые операторские события, схема без UI-полей
+          x-source: operator
+          items:
+            $ref: "#/components/schemas/WireEvent"
+
+    DispatchWhatIf:
+      type: object
+      required: [step, goal]
+      properties:
+        step:
+          type: integer
+          minimum: 0
+          description: Шаг k, с которого считается смена политики
+          x-source: operator
+        goal:
+          type: string
+          enum: [priority, revenue, priorities, money]
+          description: Целевая политика развилки (не текущая)
+          x-source: operator
+        horizon:
+          type: integer
+          minimum: 0
+          default: 10
+          description: Сколько шагов прогнать целевой сетью. По умолчанию 10.
+          x-source: operator
+        events:
+          type: array
+          description: Уже принятые операторские события, как у resume
+          x-source: operator
+          items:
+            $ref: "#/components/schemas/WireEvent"
+
+    WireEvent:
+      type: object
+      required: [id, at_step, type]
+      description: cosmo-B-events-1.0. Клиентские origin/seq/committed отбрасываются.
+      properties:
+        id: { type: string, x-source: operator }
+        at_step: { type: integer, x-source: operator }
+        type:
+          type: string
+          enum: [add_jobs, satellite_outage, close_downlink]
+          x-source: operator
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/JobSpec" }
+          x-source: operator
+        satellite_ids:
+          type: array
+          items: { type: string }
+          x-source: operator
+        end_step: { type: integer, x-source: operator }
+
+    DispatchStream:
+      description: |
+        Строки NDJSON. `meta` из сценария (+ add_jobs). `frame` — физика и
+        команды прогона. `error` — сбой воркера.
+      oneOf:
+        - $ref: "#/components/schemas/DispatchMeta"
+        - $ref: "#/components/schemas/DispatchFrame"
+        - $ref: "#/components/schemas/DispatchError"
+
+    AltDispatchStream:
+      description: |
+        Строки NDJSON второй политики. `alt` — только накопитель метрик на шаге k.
+        x-source: ppo ORBI_ALT_MODEL + physics.
+      oneOf:
+        - $ref: "#/components/schemas/AltDispatchMeta"
+        - $ref: "#/components/schemas/AltDispatchFrame"
+        - $ref: "#/components/schemas/DispatchError"
+
+    AltDispatchMeta:
+      type: object
+      properties:
+        type: { type: string, enum: [alt_meta] }
+        steps: { type: integer, x-source: scenario }
+
+    AltDispatchFrame:
+      type: object
+      required: [type, step, metrics]
+      properties:
+        type: { type: string, enum: [alt] }
+        step: { type: integer, x-source: physics }
+        metrics:
+          $ref: "#/components/schemas/DispatchMetrics"
+
+    WhatIfDispatchStream:
+      description: |
+        Строки NDJSON развилки. `whatif` — накопитель метрик на шаге после
+        префикса живого прогона и сэмпла целевой сети.
+        x-source: ppo целевого чекпоинта + physics.
+      oneOf:
+        - $ref: "#/components/schemas/WhatIfDispatchMeta"
+        - $ref: "#/components/schemas/WhatIfDispatchFrame"
+        - $ref: "#/components/schemas/DispatchError"
+
+    WhatIfDispatchMeta:
+      type: object
+      properties:
+        type: { type: string, enum: [whatif_meta] }
+        steps: { type: integer, x-source: scenario }
+        horizon: { type: integer, x-source: operator }
+        from_step: { type: integer, x-source: operator }
+        stay_step: { type: integer, x-source: operator }
+
+    WhatIfDispatchFrame:
+      type: object
+      required: [type, step, metrics]
+      properties:
+        type: { type: string, enum: [whatif] }
+        step: { type: integer, x-source: physics }
+        horizon: { type: integer, x-source: operator }
+        stay_step: { type: integer, x-source: operator }
+        metrics:
+          $ref: "#/components/schemas/DispatchMetrics"
+
+    DispatchMeta:
+      type: object
+      properties:
+        type: { type: string, enum: [meta] }
+        steps: { type: integer, x-source: scenario }
+        ids:
+          type: array
+          items: { type: string }
+          x-source: scenario
+        jobs_total:
+          type: integer
+          description: Текущее число заданий, растёт после add_jobs
+          x-source: physics
+        jobs_seed:
+          type: integer
+          description: Число заданий исходного JSON, без операторских
+          x-source: scenario
+        potential_revenue_usd:
+          type: number
+          description: Сумма value_usd текущего списка
+          x-source: scenario
+        potential_seed_usd:
+          type: number
+          x-source: scenario
+        reserve_soc_pct:
+          type: number
+          x-source: scenario
+        jobs:
+          type: array
+          x-source: scenario
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              kind: { type: string }
+              release_step: { type: integer }
+              deadline_step: { type: integer }
+              work_steps: { type: integer }
+              eligible:
+                type: array
+                items: { type: string }
+              priority: { type: integer }
+              value_usd: { type: number }
+
+    DispatchFrame:
+      type: object
+      description: |
+        Кадр k после физики тика k−1 (для k>0) и до новой команды.
+        `sat[].action` — исполненная команда после repair, не сырые логиты.
+      properties:
+        type: { type: string, enum: [frame] }
+        step: { type: integer, x-source: physics }
+        sat:
+          type: array
+          description: По КА, порядок meta.ids
+          items:
+            type: array
+            minItems: 5
+            maxItems: 5
+            description: |
+              [energy_wh, temp_c, calibration_age_steps, action, job_index]
+              energy/temp/age — physics; action 0 idle / 1 job / 2 calibrate —
+              ppo+repair; job_index в meta.jobs или -1.
+            items: { type: number }
+          x-source: physics
+        job:
+          type: array
+          description: "Дельты [index, remaining_steps, executor_sat_index, done]"
+          x-source: physics
+          items:
+            type: array
+            items: { type: integer }
+        missed:
+          type: array
+          description: Индексы заданий, чей deadline_step == k и completed_step пуст
+          x-source: physics
+          items: { type: integer }
+        open:
+          type: array
+          description: |
+            Индексы meta.jobs, которые на шаге k может взять хотя бы один КА.
+            `Environment.can_execute`, не слоты top-K. Пусто — окно ещё не открылось,
+            нет контакта, калибровка, энергия, температура или отказ.
+          x-source: physics
+          items: { type: integer }
+        take:
+          type: array
+          description: |
+            По КА (порядок meta.ids): 1 если есть хотя бы одно задание с can_execute.
+            0 — аппарату сейчас нечего взять; ожидание тогда не выбор политики.
+          x-source: physics
+          items: { type: integer, enum: [0, 1] }
+        metrics:
+          $ref: "#/components/schemas/DispatchMetrics"
+        q:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: |
+            Качество политики на кадре, для кривой таймлайна.
+            q = 0.5 · sigmoid(value / max(1, remaining_job_usd)) + 0.5 · heuristic.
+            value — critic той же сети (чекпоинт ORBI_MODEL).
+            heuristic = 0.35·(доля КА с SOC ≥ reserve) + 0.35·(доля P3 ещё в срок)
+            + 0.2·(доля не idle) + 0.1·(нет новых просрочек на шаге).
+            На терминальном кадре value=0, остаётся эвристика.
+          x-source: critic+heuristic
+
+    DispatchMetrics:
+      type: object
+      description: Накопитель по trace среды, не пересчёт клиентом
+      properties:
+        revenue_usd:
+          type: number
+          x-source: physics
+        jobs_completed:
+          type: integer
+          x-source: physics
+        jobs_due_missed:
+          type: integer
+          x-source: physics
+        critical_jobs_completed_on_time:
+          type: integer
+          x-source: physics
+        critical_jobs_due:
+          type: integer
+          x-source: physics
+        below_reserve_satellite_steps:
+          type: integer
+          x-source: physics
+        brownout_satellite_steps:
+          type: integer
+          x-source: physics
+        blocked_command_count:
+          type: integer
+          description: После repair должно быть 0
+          x-source: physics
+
+    DispatchError:
+      type: object
+      properties:
+        type: { type: string, enum: [error] }
+        detail: { type: string, x-source: api }
+
+    OpsResult:
+      type: object
+      description: Журнал смены. replay_episode организаторов должен совпасть.
+      properties:
+        schema_version:
+          type: string
+          enum: [cosmo-B-ops-result-1.0]
+          x-source: physics
+        initial_scenario:
+          x-source: scenario
+        events:
+          type: array
+          x-source: operator
+        commands:
+          type: array
+          description: Команды после repair
+          x-source: ppo
+        steps_executed:
+          type: integer
+          x-source: physics
+        summary:
+          type: object
+          x-source: physics
