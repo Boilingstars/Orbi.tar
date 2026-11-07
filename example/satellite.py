@@ -1,4 +1,4 @@
-"""Custom satellite: extra attributes, neighbor memory, extra take-job rules."""
+"""Satellite subclass for this package."""
 
 from __future__ import annotations
 
@@ -11,13 +11,7 @@ METHODS = ("competitors", "nearest_index")
 
 
 class Satellite(SatelliteShell):
-    """Shift satellite with grouping extras. Override `can_take` for extra rules."""
-
-    def can_take(self, world, job: dict | None, model: dict, k: int) -> tuple[bool, str]:
-        ok, reason = super().can_take(world, job, model, k)
-        if not ok:
-            return ok, reason
-        return True, reason
+    """Example satellite. Override `can_take` when a task needs an extra rule."""
 
 
 class NeighborView:
@@ -26,6 +20,7 @@ class NeighborView:
     def __init__(self, method: str = "competitors", memory: int = NEIGHBOR_MEMORY) -> None:
         if method not in METHODS:
             raise ValueError(f"neighbor_method must be one of {METHODS}")
+
         if memory < 1:
             raise ValueError("neighbor_memory must be >= 1")
         self.method = method
@@ -34,6 +29,7 @@ class NeighborView:
     def select(self, env, sat_i: int, mask: np.ndarray) -> list[int]:
         if sat_i >= env.n_sats:
             return []
+
         if self.method == "nearest_index":
             return self._nearest_index(env, sat_i)
         return self._competitors(env, sat_i, mask)
@@ -75,6 +71,8 @@ class NeighborView:
     def _features(self, env, sat_i: int, chosen: list[int], mask: np.ndarray) -> np.ndarray:
         rows = np.zeros((self.memory, NEIGHBOR_FEATURES), dtype=np.float32)
         own_slots = set(np.flatnonzero(mask[sat_i, : env.K]).tolist())
+
+        # Rank by SoC inside this satellite plus the neighbors it was shown.
         pool = [sat_i] + chosen
         soc = np.array([env.fleet[j].soc for j in pool], dtype=np.float32)
         denom = max(len(pool) - 1, 1)
@@ -88,6 +86,7 @@ class NeighborView:
             for slot in shared:
                 if slot >= len(env._candidates):
                     continue
+
                 if last.get(env._candidates[slot].job_id) == sat.sat_id:
                     holds = True
                     break

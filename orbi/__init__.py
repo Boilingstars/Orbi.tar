@@ -54,6 +54,7 @@ _LAZY = {
 def __getattr__(name: str):
     if name not in _LAZY:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
     if name in {"greedy_action", "random_masked_action"}:
         from orbi.greedy import greedy_action, random_masked_action
 

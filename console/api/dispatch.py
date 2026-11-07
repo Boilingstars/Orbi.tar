@@ -212,6 +212,7 @@ def _wait_live_actions(scenario: dict, step: int) -> list[np.ndarray]:
             origin.cond.wait(timeout=1.0)
         if origin.error:
             raise RuntimeError(origin.error)
+
         if len(origin.actions) < step:
             raise RuntimeError("Прогон ещё не дошёл до этого шага")
         return [np.asarray(a, dtype=np.int64) for a in origin.actions[:step]]
@@ -267,7 +268,6 @@ def iter_events(
     cat = _Catalog(scenario)
     env = OpsEnv(
         scenario=scenario,
-        goal=_goal(goal),
         events=EventConfig.off(),
         scripted_events=list(scripted_events or []),
         top_k=32,
@@ -322,6 +322,7 @@ def iter_events(
             cat.added = False
             return
             yield
+
         if cat.added:
             cat.added = False
             yield _meta(scenario, cat)
@@ -392,8 +393,10 @@ def packed_result(run: Run) -> tuple[bytes | None, str]:
     with run.cond:
         if not run.done:
             return None, "not_ready"
+
         if run.error:
             return None, "error"
+
         if run.result_bytes is None:
             return None, "too_large" if run.result_size > RESULT_LIMIT else "missing"
         return run.result_bytes, "ok"
@@ -549,10 +552,10 @@ def _load_model(path: str | None = None):
                 torch.set_num_interop_threads(1)
             except RuntimeError:
                 pass
-            from example.policy import OpsAttentionPolicy  # noqa: F401
-            from example.evaluate import _load_ppo
+            from example.models import OpsAttentionPolicy  # noqa: F401
+            from tools.evaluating import load_ppo
 
-            cached = _load_ppo(target)
+            cached = load_ppo(target)
             cached.policy.set_training_mode(False)
             _models[target] = cached
         return cached
@@ -681,6 +684,7 @@ def _quality(
         live = phys.jobs[spec["id"]]
         if live["completed_step"] is None:
             remaining += float(spec["value_usd"])
+
         if int(spec["priority"]) != 3:
             continue
         p3 += 1
@@ -744,6 +748,7 @@ def _frame(
             tally.critical_due += 1
             if job["completed_step"] is not None:
                 tally.critical_done += 1
+
         if job["completed_step"] is None:
             missed.append(index)
             tally.missed += 1
@@ -795,6 +800,7 @@ def _access(phys, cat: _Catalog) -> tuple[list[int], list[int]]:
         live = phys.jobs.get(spec["id"])
         if live is None or live["completed_step"] is not None:
             continue
+
         if not (int(spec["release_step"]) <= k < int(spec["deadline_step"])):
             continue
         found = False

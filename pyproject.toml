@@ -34,6 +34,7 @@ Repository = "https://github.com/Boilingstars/HARMONY"
 [tool.setuptools]
 packages = [
     "orbi",
+    "tools",
     "example",
     "console",
     "console.api",

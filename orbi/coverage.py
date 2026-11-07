@@ -66,15 +66,7 @@ def footprint_radius(alt_m: float, min_elev: float) -> float:
     return R_EARTH * earth_central_angle(alt_m, min_elev)
 
 
-def koe_to_rv(
-    a: float,
-    e: float,
-    inc: float,
-    raan: float,
-    argp: float,
-    nu: float,
-    mu: float = MU_EARTH,
-) -> tuple[np.ndarray, np.ndarray]:
+def koe_to_rv(a: float, e: float, inc: float, raan: float, argp: float, nu: float, mu: float = MU_EARTH) -> tuple[np.ndarray, np.ndarray]:  
     """Classical orbital elements to ECI position/velocity."""
     p = a * (1.0 - e**2) if e < 0.999 else a
     if e < 1e-12:
@@ -106,31 +98,14 @@ def true_anomaly_from_mean(M: float, e: float, iters: int = 12) -> float:
     return float(np.arctan2(sin_nu, cos_nu))
 
 
-def rv_at_time(
-    a: float,
-    e: float,
-    inc: float,
-    raan: float,
-    argp: float,
-    m0: float,
-    t: float,
-    t0: float = 0.0,
-    mean_motion: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+def rv_at_time(a: float, e: float, inc: float, raan: float, argp: float, m0: float, t: float, t0: float = 0.0, mean_motion: float | None = None) -> tuple[np.ndarray, np.ndarray]:
     n = np.sqrt(MU_EARTH / a**3) if mean_motion is None else float(mean_motion)
     M = m0 + n * (t - t0)
     nu = true_anomaly_from_mean(M, e)
     return koe_to_rv(a, e, inc, raan, argp, nu)
 
 
-def walker_delta_elements(
-    n_sats: int,
-    n_planes: int,
-    altitude_m: float,
-    inclination: float,
-    phasing: int = 1,
-    raan_offset: float = 0.0,
-) -> list[tuple[float, float, float, float, float, float]]:
+def walker_delta_elements(n_sats: int, n_planes: int, altitude_m: float, inclination: float, phasing: int = 1, raan_offset: float = 0.0) -> list[tuple[float, float, float, float, float, float]]:
     """Return list of (a, e, i, RAAN, argp, M0) for a Walker-Delta constellation."""
     if n_sats % n_planes != 0:
         raise ValueError("n_sats must be divisible by n_planes")
@@ -159,71 +134,50 @@ def in_sunlight(r_eci: np.ndarray, sun_eci: np.ndarray, radius: float = R_EARTH)
     return float(np.linalg.norm(perp)) > radius
 
 
-def access_remaining(
-    r_sat_fn,
-    lat: float,
-    lon: float,
-    t0: float,
-    min_elev: float,
-    gmst0: float = 0.0,
-    max_horizon: float = 900.0,
-    dt: float = 10.0,
-) -> float:
-    """
-    Seconds the target stays in view after t0.
+def _seconds_until(t0: float, horizon: float, dt: float, still_true, refine: int, last_true: bool) -> float:
+    """Seconds after t0 until `still_true` fails. `last_true` keeps the last good instant."""
+    t = t0
+    limit = t0 + horizon
+    while t < limit:
+        nxt = min(t + dt, limit)
+        if still_true(nxt):
+            t = nxt
+            continue
+
+        # Bisect the step that crossed.
+        lo, hi = t, nxt
+        for _ in range(refine):
+            mid = 0.5 * (lo + hi)
+            if still_true(mid):
+                lo = mid
+            else:
+                hi = mid
+        end = lo if last_true else hi
+        return max(0.0, end - t0)
+    return horizon
+
+
+def access_remaining(r_sat_fn, lat: float, lon: float, t0: float, min_elev: float, gmst0: float = 0.0, max_horizon: float = 900.0, dt: float = 10.0) -> float:
+    """Seconds the target stays in view after t0.
 
     r_sat_fn(t) -> ECI position. Returns 0 if the target is not in view at t0.
     """
     tgt = lla_to_ecef(lat, lon, 0.0)
 
-    def elev_at(t: float) -> float:
+    def in_view(t: float) -> bool:
         r_ecef = eci_to_ecef(r_sat_fn(t), t, gmst0)
-        return elevation(r_ecef, tgt)
+        return elevation(r_ecef, tgt) >= min_elev
 
-    if elev_at(t0) < min_elev:
+    if not in_view(t0):
         return 0.0
-
-    t = t0
-    t_limit = t0 + max_horizon
-    while t < t_limit:
-        t_next = min(t + dt, t_limit)
-        if elev_at(t_next) < min_elev:
-            lo, hi = t, t_next
-            for _ in range(18):
-                mid = 0.5 * (lo + hi)
-                if elev_at(mid) >= min_elev:
-                    lo = mid
-                else:
-                    hi = mid
-            return max(0.0, lo - t0)
-        t = t_next
-    return max_horizon
+    return _seconds_until(t0, max_horizon, dt, in_view, refine=18, last_true=True)
 
 
-def time_to_sun_change(
-    r_sat_fn,
-    sun_eci: np.ndarray,
-    t0: float,
-    currently_in_sun: bool,
-    max_horizon: float = 6000.0,
-    dt: float = 20.0,
-) -> float:
-    t = t0
-    t_limit = t0 + max_horizon
-    while t < t_limit:
-        t_next = min(t + dt, t_limit)
-        lit = in_sunlight(r_sat_fn(t_next), sun_eci)
-        if lit != currently_in_sun:
-            lo, hi = t, t_next
-            for _ in range(16):
-                mid = 0.5 * (lo + hi)
-                if in_sunlight(r_sat_fn(mid), sun_eci) == currently_in_sun:
-                    lo = mid
-                else:
-                    hi = mid
-            return max(0.0, hi - t0)
-        t = t_next
-    return max_horizon
+def time_to_sun_change(r_sat_fn, sun_eci: np.ndarray, t0: float, currently_in_sun: bool, max_horizon: float = 6000.0, dt: float = 20.0) -> float:
+    def same_light(t: float) -> bool:
+        return in_sunlight(r_sat_fn(t), sun_eci) == currently_in_sun
+
+    return _seconds_until(t0, max_horizon, dt, same_light, refine=16, last_true=False)
 
 
 def haversine_m(lat1, lon1, lat2, lon2):
@@ -288,6 +242,7 @@ def _in_land(lon: float, lat: float, features) -> bool:
             feat["_polys"] = polys
         else:
             polys = feat["_polys"]
+
         if lon < box[0] or lon > box[2] or lat < box[1] or lat > box[3]:
             continue
         for poly in polys:
@@ -353,6 +308,8 @@ def write_ground_points(path: Path | None = None, radius_km: float = GROUND_COVE
         "https://download.geonames.org/export/dump/cities15000.zip",
         "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_populated_places_simple.geojson",
     )
+
+    # Land outline, then the first city catalog that answers.
     with urllib.request.urlopen(land_url, timeout=60) as resp:
         land = json.loads(resp.read().decode("utf-8"))["features"]
     cities: list[tuple[float, float, int, str]] = []
@@ -367,6 +324,7 @@ def write_ground_points(path: Path | None = None, radius_km: float = GROUND_COVE
     if not cities:
         raise RuntimeError("Could not download inhabited places")
 
+    # Cities cover nearby hex cells. Leftover cells keep their own centre.
     cells = _hex_land_cells(land, radius_km)
     cover_m = radius_km * 1e3
     cell_lat = np.deg2rad(cells[:, 0])
@@ -390,6 +348,7 @@ def write_ground_points(path: Path | None = None, radius_km: float = GROUND_COVE
             break
     for i in np.flatnonzero(uncovered):
         picked.append((round(float(cells[i, 0]), 4), round(float(cells[i, 1]), 4), "land"))
+
     dest.write_text(
         json.dumps({"radius_km": radius_km, "points": [[p, q] for p, q, _n in picked]}, separators=(",", ":")),
         encoding="utf-8",

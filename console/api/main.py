@@ -299,8 +299,10 @@ def result():
     payload, status = packed_result(run)
     if status == "not_ready":
         raise HTTPException(status_code=409, detail="Прогон ещё не готов")
+
     if status == "too_large":
         raise HTTPException(status_code=413, detail="Результат больше 120 Мб")
+
     if status != "ok" or payload is None:
         raise HTTPException(status_code=500, detail=run.error or "Нет результата прогона")
     name = f"{_shift['scenario']['meta']['id']}.result.json"

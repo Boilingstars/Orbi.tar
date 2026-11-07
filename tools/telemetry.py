@@ -1,17 +1,20 @@
-"""Логирование обучения: каталог запуска, логгер SB3 и доменные метрики.
+"""Run directory, SB3 logger, and the core shift metrics.
 
-На каждый запуск заводится `agent/runs/<дата-время>_<сценарий>_<goal>/`:
+Custom job fields are not listed here. A user package registers them with
+`tools.jobs.register_job_field`; this writer appends whatever is registered.
 
-- `train.log`   — человекочитаемый поток SB3, то же, что в stdout
-- `progress.csv`— машинный ряд, из него `agent/plots.py` строит графики
-- `tb/`         — tensorboard, включается флагом
-- `config.json` — снимок гиперпараметров, seed, сценария, вероятностей событий
+A run is stored under `experiments/runs/<dd_mm_yy_HH_MM>_<suite>_<policy>/`:
+
+- `train.log`    — human-readable SB3 stream, same as stdout
+- `progress.csv` — numeric series
+- `tb/`          — TensorBoard, enabled by flag
+- `config.json`  — hyperparameters, seed, scenario, event rates
 """
 
 from __future__ import annotations
 
-import json
 import csv
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,17 +29,17 @@ from stable_baselines3.common.logger import (
     TensorBoardOutputFormat,
 )
 
-REPO_DIR = Path(__file__).resolve().parents[1]
-RUNS_DIR = REPO_DIR / "agent" / "runs"
-FIGURES_DIR = REPO_DIR / "agent" / "figures"
+from tools.jobs import job_field_log_map
 
-# summary() организаторов -> имена в progress.csv
+REPO_DIR = Path(__file__).resolve().parents[1]
+RUNS_DIR = REPO_DIR / "experiments" / "runs"
+
+# Environment.summary() keys -> progress.csv names. Custom fields are separate.
 _SUMMARY_KEYS = {
     "jobs_completed": "ops/jobs_completed",
     "jobs_due_missed": "ops/jobs_due_missed",
     "critical_jobs_completed_on_time": "ops/critical_done_on_time",
     "critical_jobs_due": "ops/critical_due",
-    "revenue_usd": "ops/revenue_usd",
     "below_reserve_satellite_steps": "ops/below_reserve_steps",
     "brownout_satellite_steps": "ops/brownout_steps",
     "minimum_soc_pct": "ops/min_soc_pct",
@@ -58,16 +61,25 @@ _OPS_KEYS = {
 }
 
 
-def make_run_dir(scenario_id: str, goal: str, root: Path | str | None = None) -> Path:
+def make_run_dir(suite: str, policy_name: str, root: Path | str | None = None) -> Path:
+    """`<stamp>_<suite>_<policy>`, for example `07_11_26_19_30_example_dispatcher`."""
+
     root = Path(root) if root is not None else RUNS_DIR
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    run_dir = root / f"{stamp}_{scenario_id}_{goal}"
+    stamp = datetime.now().strftime("%d_%m_%y_%H_%M")
+    suite_tag = str(suite).strip().replace("/", "-") or "suite"
+    policy_tag = str(policy_name).strip().replace("/", "-") or "policy"
+    name = f"{stamp}_{suite_tag}_{policy_tag}"
+    run_dir = root / name
+    suffix = 2
+    while run_dir.exists():
+        run_dir = root / f"{name}_{suffix}"
+        suffix += 1
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
 
 class _ResumingCSVOutputFormat(CSVOutputFormat):
-    """Дописывает progress.csv, не обнуляя уже записанные rollout."""
+    """Append to progress.csv without wiping logged rollouts."""
 
     def __init__(self, filename: str):
         self.file = open(filename, "r+", encoding="utf-8", newline="")
@@ -96,9 +108,7 @@ def last_logged_timesteps(run_dir: Path | str) -> int:
     return int(float(cols[idx]))
 
 
-def configure_run_logger(
-    run_dir: Path | str, tensorboard: bool = False, resume: bool = False
-) -> Logger:
+def configure_run_logger(run_dir: Path | str, tensorboard: bool = False, resume: bool = False) -> Logger:
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     csv_path = run_dir / "progress.csv"
@@ -129,11 +139,11 @@ def dump_config(run_dir: Path | str, config: dict[str, Any]) -> Path:
 
 
 class OpsMetricsCallback(BaseCallback):
-    """Забирает `Environment.summary()` из info в конце эпизода.
+    """Copy `Environment.summary()` from info at episode end.
 
-    Стоковые `rollout/ep_rew_mean` и `train/*` SB3 пишет сам; здесь добавляются
-    показатели, по которым оценивается смена: критичные задания в срок, выручка,
-    провалы по энергии и структура команд.
+    SB3 already logs `rollout/ep_rew_mean` and `train/*`. This adds the core
+    shift metrics. Registered job fields are appended under their log keys, so
+    they show up in the same cmd table.
     """
 
     def __init__(self, verbose: int = 0) -> None:
@@ -150,7 +160,9 @@ class OpsMetricsCallback(BaseCallback):
             if summary is None:
                 continue
             self.episodes += 1
-            for src, dst in _SUMMARY_KEYS.items():
+
+            # Core summary keys, plus any job field a package registered.
+            for src, dst in {**_SUMMARY_KEYS, **job_field_log_map()}.items():
                 if src in summary:
                     self._add(dst, summary[src])
             due = max(summary.get("jobs_due", 0), 1)
@@ -160,6 +172,8 @@ class OpsMetricsCallback(BaseCallback):
                 "ops/critical_on_time_share",
                 summary.get("critical_jobs_completed_on_time", 0) / critical_due,
             )
+
+            # Action mix and event counts live on info["ops"], not on the summary.
             for src, dst in _OPS_KEYS.items():
                 value = info.get("ops", {}).get(src)
                 if value is not None:
@@ -174,11 +188,10 @@ class OpsMetricsCallback(BaseCallback):
 
 
 __all__ = [
-    "AGENT_DIR",
-    "FIGURES_DIR",
     "OpsMetricsCallback",
     "RUNS_DIR",
     "configure_run_logger",
     "dump_config",
+    "last_logged_timesteps",
     "make_run_dir",
 ]

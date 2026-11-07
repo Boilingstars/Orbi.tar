@@ -17,19 +17,18 @@ _EDGE_LAST_EXECUTOR = 4
 CALIBRATE_AT = 0.85
 
 
-def greedy_action(
-    obs: dict[str, np.ndarray],
-    downlink_limit: int = 2,
-    calibrate_at: float = CALIBRATE_AT,
-) -> np.ndarray:
+def greedy_action(obs: dict[str, np.ndarray], downlink_limit: int = 2, calibrate_at: float = CALIBRATE_AT) -> np.ndarray:
     mask = np.asarray(obs["mask"], dtype=bool)
     jobs = np.asarray(obs["jobs"], dtype=np.float32)
     sats = np.asarray(obs["sats"], dtype=np.float32)
     edges = np.asarray(obs["edges"], dtype=np.float32)
+
     n, width = mask.shape
     k = width - 2
     idle, calibrate = k, k + 1
     action = np.full(n, idle, dtype=np.int64)
+
+    # Highest priority, then value per remaining step, then the sooner deadline.
     priority = jobs[:, _JOB_PRIO].argmax(axis=1) + 1
     has_job = jobs[:, _JOB_PRIO].sum(axis=1) > 0
     remaining = np.maximum(jobs[:, _JOB_REMAINING], 1e-3)
@@ -38,6 +37,8 @@ def greedy_action(
         (slot for slot in range(k) if has_job[slot] and mask[:, slot].any()),
         key=lambda s: (-priority[s], -rate[s], jobs[s, _JOB_DEADLINE]),
     )
+
+    # One free satellite per slot. SoC, then whoever already holds the job.
     taken = np.zeros(n, dtype=bool)
     downlinks = 0
     for slot in order:
@@ -50,9 +51,12 @@ def greedy_action(
         action[pick] = slot
         taken[pick] = True
         downlinks += int(jobs[slot, _JOB_DOWNLINK] > 0.5)
+
+    # Calibrate only once the age reaches the free window. Idle stays the default.
     for i in range(n):
         if taken[i] or not mask[i, calibrate]:
             continue
+
         if sats[i, _SAT_CAL_AGE] >= calibrate_at:
             action[i] = calibrate
     return action
@@ -63,6 +67,7 @@ def random_masked_action(obs: dict[str, np.ndarray], rng: np.random.Generator | 
     mask = np.asarray(obs["mask"], dtype=bool)
     n, width = mask.shape
     action = np.full(n, width - 2, dtype=np.int64)
+
     for i in range(n):
         valid = np.flatnonzero(mask[i])
         if valid.size:
@@ -70,21 +75,18 @@ def random_masked_action(obs: dict[str, np.ndarray], rng: np.random.Generator | 
     return action
 
 
-def run(scenario="p02", seed: int = 0, goal: str = "priority") -> dict:
+def run(scenario="p02", seed: int = 0) -> dict:
     """Solve one episode from initial JSON, choosing a command each tick."""
     from orbi.env import EventConfig, OpsEnv, load, resolve_scenario
 
     spec = load(resolve_scenario(scenario) if not isinstance(scenario, dict) else scenario)
-    env = OpsEnv(scenario=spec, goal=goal, events=EventConfig.off(), seed=seed)
-    obs, _ = env.reset(seed=seed)
-    total = 0.0
-    terminated = truncated = False
-    info: dict = {}
-    while not (terminated or truncated):
-        action = greedy_action(obs, downlink_limit=env.downlink_limit)
-        obs, reward, terminated, truncated, info = env.step(action)
-        total += float(reward)
-    return {"return": total, "summary": info.get("summary", {}), "ops": info.get("ops", {})}
+    env = OpsEnv(scenario=spec, events=EventConfig.off(), seed=seed)
+
+    # Same episode loop the evaluator uses. This entry only keeps the shift totals.
+    from tools.evaluating import run_episode
+
+    row = run_episode(env, lambda obs: greedy_action(obs, downlink_limit=env.downlink_limit), seed=seed)
+    return {"return": row["return"], "summary": row["summary"], "ops": row["ops"]}
 
 
 __all__ = ["CALIBRATE_AT", "greedy_action", "random_masked_action", "run"]

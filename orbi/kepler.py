@@ -52,15 +52,7 @@ class KeplerWorld:
         return float(self.periods_s[0])
 
     @classmethod
-    def walker(
-        cls,
-        n_sats: int = 4,
-        n_planes: int = 2,
-        altitude_m: float = 500e3,
-        inclination: float = np.deg2rad(51.6),
-        min_elev: float = np.deg2rad(10.0),
-        raan_offset: float = 0.0,
-    ) -> KeplerWorld:
+    def walker(cls, n_sats: int = 4, n_planes: int = 2, altitude_m: float = 500e3, inclination: float = np.deg2rad(51.6), min_elev: float = np.deg2rad(10.0), raan_offset: float = 0.0) -> KeplerWorld:
         els = geo.walker_delta_elements(n_sats, n_planes, altitude_m, inclination, raan_offset=raan_offset)
         period_min = orbital_period(R_EARTH + altitude_m) / 60.0
         orbits = [
@@ -96,6 +88,8 @@ class KeplerWorld:
         """Redraw sun and GMST. Orbital elements stay as loaded."""
         self._rng = np.random.default_rng(seed)
         self.t = 0.0
+
+        # One Greenwich angle and one sun direction for the whole episode.
         self.gmst0 = float(self._rng.uniform(0.0, 2.0 * np.pi))
         lon = float(self._rng.uniform(0.0, 2.0 * np.pi))
         lat = float(np.arcsin(self._rng.uniform(-0.4, 0.4)))
@@ -104,6 +98,19 @@ class KeplerWorld:
         )
         self._access_cache = {}
         self._sun_cache = {}
+
+    def _stored(self, cache: dict, key, limit: int, compute):
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        value = compute()
+        cache[key] = value
+        if len(cache) > limit:
+            cache.clear()
+        return value
+
+    def _above(self, r_sat: np.ndarray, lat: float, lon: float) -> bool:
+        return geo.elevation(r_sat, geo.lla_to_ecef(lat, lon)) >= self.min_elev
 
     def r_eci(self, sat_i: int, t: float | None = None) -> np.ndarray:
         t_use = self.t if t is None else t
@@ -140,10 +147,7 @@ class KeplerWorld:
 
     def sees_any(self, sat_i: int, points, t: float | None = None) -> bool:
         r_sat = self.r_ecef(sat_i, t)
-        for row in points:
-            if geo.elevation(r_sat, geo.lla_to_ecef(float(row[0]), float(row[1]))) >= self.min_elev:
-                return True
-        return False
+        return any(self._above(r_sat, float(row[0]), float(row[1])) for row in points)
 
     def sees_job(self, sat_i: int, point_a, point_b, t: float | None = None) -> bool:
         """True only if this satellite sees both A and B now. No cross-sat relay."""
@@ -151,55 +155,47 @@ class KeplerWorld:
         if a is None or b is None:
             return False
         r_sat = self.r_ecef(sat_i, t)
-        return (
-            geo.elevation(r_sat, geo.lla_to_ecef(a[0], a[1])) >= self.min_elev
-            and geo.elevation(r_sat, geo.lla_to_ecef(b[0], b[1])) >= self.min_elev
-        )
+        return self._above(r_sat, a[0], a[1]) and self._above(r_sat, b[0], b[1])
 
     def access_remaining(self, sat_i: int, lat: float, lon: float, t_query: float) -> float:
         key = (sat_i, round(lat, 5), round(lon, 5), round(float(t_query), 1))
-        cached = self._access_cache.get(key)
-        if cached is not None:
-            return cached
-        value = geo.access_remaining(
-            lambda tau, i=sat_i: self.r_eci(i, tau),
-            lat,
-            lon,
-            t_query,
-            self.min_elev,
-            gmst0=self.gmst0,
-            max_horizon=0.25 * self.periods_s[sat_i],
-            dt=8.0,
-        )
-        self._access_cache[key] = value
-        if len(self._access_cache) > 4096:
-            self._access_cache.clear()
-        return value
+
+        def compute() -> float:
+            return geo.access_remaining(
+                lambda tau, i=sat_i: self.r_eci(i, tau),
+                lat,
+                lon,
+                t_query,
+                self.min_elev,
+                gmst0=self.gmst0,
+                max_horizon=0.25 * self.periods_s[sat_i],
+                dt=8.0,
+            )
+
+        return self._stored(self._access_cache, key, 4096, compute)
 
     def time_to_sun_change(self, sat_i: int) -> float:
         key = (sat_i, round(self.t, 1))
-        cached = self._sun_cache.get(key)
-        if cached is not None:
-            return cached
-        lit = self.in_sun(sat_i)
-        value = geo.time_to_sun_change(
-            lambda tau, i=sat_i: self.r_eci(i, tau),
-            self.sun_eci,
-            self.t,
-            lit,
-            max_horizon=self.periods_s[sat_i],
-            dt=20.0,
-        )
-        self._sun_cache[key] = value
-        if len(self._sun_cache) > 512:
-            self._sun_cache.clear()
-        return value
+
+        def compute() -> float:
+            return geo.time_to_sun_change(
+                lambda tau, i=sat_i: self.r_eci(i, tau),
+                self.sun_eci,
+                self.t,
+                self.in_sun(sat_i),
+                max_horizon=self.periods_s[sat_i],
+                dt=20.0,
+            )
+
+        return self._stored(self._sun_cache, key, 512, compute)
 
     def step(self, dt: float, payload_w: np.ndarray | None = None) -> None:
         if len(self.elements) != self.n_sats:
             raise ValueError("The constellation is fixed; orbits are not recomputed")
+
         if dt <= 0.0:
             return
+            
         self.t += float(dt)
         self._access_cache.clear()
         self._sun_cache.clear()

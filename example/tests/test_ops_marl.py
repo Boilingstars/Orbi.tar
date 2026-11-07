@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from example.control import GroundControl
-from example.policy import CtdeNet, LocalActor
+from example.models import CtdeNet, LocalActor
 from example.satellite import NeighborView
 from orbi.env import EventConfig, NEIGHBOR_FEATURES, OpsEnv
 

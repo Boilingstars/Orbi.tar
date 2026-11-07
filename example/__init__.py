@@ -1,1 +1,1 @@
-"""Example shift dispatcher built on Orbi.tar."""
+"""Example app: the shift dispatcher plugged into the simulator."""

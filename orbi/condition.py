@@ -62,8 +62,10 @@ class Heartbeat:
 def as_task(task) -> TaskCondition | None:
     if task is None:
         return None
+
     if isinstance(task, TaskCondition):
         return task
+
     if isinstance(task, dict):
         a = task.get("point_a") or (0.0, 0.0)
         b = task.get("point_b") or (0.0, 0.0)
@@ -88,6 +90,8 @@ def sat_condition(world: KeplerWorld, sat: Satellite | int, task=None) -> SatCon
     task = as_task(task)
     lat, lon, alt = world.lla(sat_i)
     in_sun = bool(world.in_sun(sat_i))
+
+    # Visibility is only defined when a job was passed in.
     in_view = False
     access = 0.0
     can = False
@@ -98,6 +102,8 @@ def sat_condition(world: KeplerWorld, sat: Satellite | int, task=None) -> SatCon
             float(world.access_remaining(sat_i, task.point_b[0], task.point_b[1], world.t)),
         )
         can = in_view
+
+    # An index alone has geometry, not a battery.
     energy = sat.energy_wh if isinstance(sat, Satellite) else 0.0
     cap = sat.capacity_wh if isinstance(sat, Satellite) else 1.0
     temp = sat.temp_c if isinstance(sat, Satellite) else 0.0

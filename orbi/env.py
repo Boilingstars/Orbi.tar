@@ -1,4 +1,4 @@
-"""Gymnasium shift environment. One step is one tick for the whole fleet.
+"""Gymnasium environment. One step is one tick for the whole fleet.
 
 Geometry comes from KeplerWorld. Jobs and events are sampled from seed.
 `OpsEnv` is the single model entry for train, greedy, and console.
@@ -18,6 +18,8 @@ import numpy as np
 from orbi.coverage import load_ground_points, pair_ground_points
 from orbi.kepler import KeplerWorld
 from orbi.satellite import Satellite as SatelliteTemplate
+from tools.observation import Observation
+from tools.reward import Reward
 
 N_MAX = 48
 TOP_K = 32
@@ -25,7 +27,7 @@ PLAN_MAX = 8192
 SAT_FEATURES = 14
 JOB_FEATURES = 13
 EDGE_FEATURES = 5
-GLOBAL_FEATURES = 8
+GLOBAL_FEATURES = 6
 NEIGHBOR_MEMORY = 12
 NEIGHBOR_FEATURES = 7
 GROUND_POINTS = 64
@@ -70,6 +72,8 @@ def resolve_scenario(name: str | Path) -> Path:
 def validate(cfg: dict) -> None:
     if not isinstance(cfg, dict) or "satellites" not in cfg or "time" not in cfg or "model" not in cfg:
         raise ValueError("Initial JSON needs satellites, time, and model")
+
+    # Each satellite needs a unique id, an orbit, and a battery.
     sats = cfg["satellites"]
     if not isinstance(sats, list) or not 1 <= len(sats) <= N_MAX:
         raise ValueError("satellites must contain 1..48 objects")
@@ -87,9 +91,11 @@ def validate(cfg: dict) -> None:
             raise ValueError("Invalid battery capacity")
     if len(ids) != len(set(ids)):
         raise ValueError("Satellite IDs must be unique")
+
     steps, dt = cfg["time"].get("steps"), cfg["time"].get("step_s")
     if type(steps) is not int or steps < 1:
         raise ValueError("time.steps must be a positive integer")
+
     if not isinstance(dt, (int, float)) or dt <= 0:
         raise ValueError("time.step_s must be positive")
 
@@ -101,65 +107,6 @@ def load(path: str | Path | dict) -> dict:
     cfg = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     validate(cfg)
     return cfg
-
-
-@dataclass
-class Reward:
-    name: str = "reward"
-    progress: float = 0.15
-    below_reserve: float = 0.02
-    brownout: float = 0.5
-    blocked: float = 0.02
-    executor_switch: float = 0.05
-    conflict: float = 0.15
-    early_calibrate: float = 0.15
-    calibrate_free_at: float = 0.85
-
-    def on_complete(self, job: dict) -> float:
-        return 0.0
-
-    def on_miss(self, job: dict) -> float:
-        return 0.0
-
-    def score(self, env, rows: list[dict], prev_executor: dict[str, str], stats: dict[str, float]) -> float:
-        reward = 0.0
-        switches = 0
-        executed: dict[str, str] = {}
-        for row in rows:
-            if row["executed"] == "job":
-                job_id = row["requested"]["job_id"]
-                executed[job_id] = row["satellite_id"]
-                reward += self.progress
-                if prev_executor.get(job_id) not in (None, row["satellite_id"]):
-                    switches += 1
-            if row["below_reserve"]:
-                reward -= self.below_reserve
-            if row["brownout"]:
-                reward -= self.brownout
-            if row["reason"] not in ("accepted", "idle"):
-                reward -= self.blocked
-        reward -= self.executor_switch * switches
-        reward -= self.conflict * stats.get("conflicts", 0.0)
-        reward -= self.early_calibrate * stats.get("early_calibrations", 0.0)
-        env.ops_stats["executor_switches"] += switches
-        env._last_executor = executed
-        for row in rows:
-            job_id = row["completed_job"]
-            if job_id is None:
-                continue
-            reward += self.on_complete(env.jobs[job_id])
-        for job in env.jobs.values():
-            if job["deadline_step"] == env.k and job["completed_step"] is None:
-                reward += self.on_miss(job)
-        return reward
-
-
-class Observation:
-    def encode(self, env) -> dict:
-        raise NotImplementedError("Provide an observation encoder")
-
-    def known_jobs(self, env) -> list[dict]:
-        return [j for j in env.jobs.values() if j["completed_step"] is None and j["remaining_steps"] > 0]
 
 
 class Task:
@@ -204,7 +151,6 @@ class OpsEnv(gym.Env):
         scenario: str | Path | dict = "p02",
         reward=None,
         observation=None,
-        goal: str | None = None,
         top_k: int = TOP_K,
         n_max: int = N_MAX,
         events: EventConfig | None = None,
@@ -218,17 +164,21 @@ class OpsEnv(gym.Env):
         far_job_p: float = FAR_JOB_P,
         cluster: list[str] | None = None,
         sat_cls=None,
+        job_catalog=None,
     ) -> None:
         super().__init__()
+
+        # Reward and observation come from the task package when the caller omits them.
         if reward is None or observation is None:
             from example.task import bind
 
-            reward, observation = bind(goal or "priority", reward, observation)
+            reward, observation = bind(reward, observation)
         self.reward = reward
         self.observation = observation
-        self.goal = getattr(reward, "name", goal or "priority")
         self.cfg = scenario if isinstance(scenario, dict) else load(resolve_scenario(scenario))
         self.scenario = self.cfg
+
+        # Slot count, fleet width, and the sampling knobs for this launch.
         self.K = int(top_k)
         self.N = int(n_max)
         self.events_cfg = events if events is not None else EventConfig()
@@ -240,6 +190,7 @@ class OpsEnv(gym.Env):
         self.n_ground = max(2, int(ground_points))
         self.far_job_p = float(np.clip(far_job_p, 0.0, 1.0))
         self.sat_cls = sat_cls
+        self.job_catalog = job_catalog
         self._seed = seed
 
         specs = list(self.cfg["satellites"])
@@ -257,6 +208,8 @@ class OpsEnv(gym.Env):
         self.reserve_pct = float(self.model["reserve_soc_pct"])
         self.idle_index = self.K
         self.calibrate_index = self.K + 1
+
+        # One categorical per satellite: K job slots, idle, calibrate.
         self.action_space = gym.spaces.MultiDiscrete([self.K + 2] * self.N)
         self.observation_space = gym.spaces.Dict(
             {
@@ -271,6 +224,7 @@ class OpsEnv(gym.Env):
                 "mask": gym.spaces.Box(0.0, 1.0, (self.N, self.K + 2), np.float32),
             }
         )
+        # Episode state. reset fills the fleet, the jobs, and the mask.
         self.cluster = list(cluster) if cluster is not None else None
         self.ground_control = None
         self.neighbor_view = None
@@ -315,6 +269,8 @@ class OpsEnv(gym.Env):
         if seed is not None:
             self._seed = seed
             self.rng = np.random.default_rng(seed)
+
+        # New world and fleet. Orbits stay as loaded; sun and jobs are redrawn.
         self.world = KeplerWorld.from_config(self.cfg)
         self.world.reset(seed=self._seed)
         self._make_sats()
@@ -353,8 +309,11 @@ class OpsEnv(gym.Env):
         kind = action.get("action", "idle")
         if kind == "idle":
             return True, "idle", 0.0
+
         if not sat.available(self.k):
             return False, "satellite_unavailable", 0.0
+
+        # Calibrate has a fixed load. A job must pass the satellite's own check.
         job = self.jobs.get(action.get("job_id")) if kind == "job" else None
         if kind == "calibrate":
             power = sat.calibration_w
@@ -365,6 +324,8 @@ class OpsEnv(gym.Env):
             power = sat.payload_w(kind, job)
         else:
             return False, "unknown_action", 0.0
+
+        # The tick must leave the battery above reserve and the temperature in range.
         solar = sat.panel_w() if self.world.in_sun(sat.index) else 0.0
         energy, temp, _, _ = sat.transition(solar, power, self.model, self.dt)
         reserve = sat.capacity_wh * self.model["reserve_soc_pct"] / 100.0
@@ -376,17 +337,21 @@ class OpsEnv(gym.Env):
         return True, "accepted", power
 
     def step(self, action):
+        # Decode the integers, advance physics, then score the tick.
         commands, stats = self._apply_actions(np.asarray(action, dtype=np.int64))
         prev = dict(self._last_executor)
         rows = self._advance(commands)
         self._commands.append(commands)
         reward = self.reward.score(self, rows, prev, stats)
+
+        # Running totals for the episode log.
         self.ops_stats["act_idle"] += stats["idle"]
         self.ops_stats["act_calibrate"] += stats["calibrate"]
         self.ops_stats["act_job"] += stats["job"]
         self.ops_stats["conflicts_repaired"] += stats["conflicts"]
         self.ops_stats["downlink_slots_used"] += stats["downlinks"]
         self.ops_stats["reward_total"] += reward
+        # Events keep arriving until the shift or the step cap ends.
         terminated = self.k >= self.steps_total
         truncated = bool(self.max_steps is not None and self.k >= self.max_steps)
         info: dict[str, Any] = {"step": self.k}
@@ -405,6 +370,8 @@ class OpsEnv(gym.Env):
             requested = commands.get(sat.sat_id, {"action": "idle"})
             ok, reason, power = self.can_execute(sat.sat_id, requested)
             job = self.jobs.get(requested.get("job_id")) if requested.get("action") == "job" else None
+
+            # One holder per job, and only `downlink_limit` downlinks in the tick.
             if ok and job:
                 if job["id"] in used:
                     ok, reason, power = False, "duplicate_job_in_step", 0.0
@@ -413,12 +380,16 @@ class OpsEnv(gym.Env):
             actual = requested.get("action", "idle") if ok else "idle"
             if not ok:
                 power = 0.0
+
+            # Battery, temperature, and calibration age for this satellite.
             solar = sat.panel_w() if self.world.in_sun(sat.index) else 0.0
             before_e, before_t = sat.energy_wh, sat.temp_c
             energy, temp, heater, load_w = sat.transition(solar, power, self.model, self.dt)
             sat.energy_wh = min(sat.capacity_wh, max(0.0, energy))
             sat.temp_c = temp
             sat.calibration_age_steps = 0 if actual == "calibrate" else sat.calibration_age_steps + 1
+
+            # A finished job leaves the queue on the next tick.
             completed = None
             if ok and actual == "job" and job is not None:
                 used.add(job["id"])
@@ -447,6 +418,7 @@ class OpsEnv(gym.Env):
                     "below_reserve": sat.energy_wh < sat.capacity_wh * self.reserve_pct / 100.0 - 1e-9,
                 }
             )
+        # The constellation moves after every satellite has been updated.
         self.world.step(self.dt)
         self.trace.extend(rows)
         self.k += 1
@@ -461,32 +433,15 @@ class OpsEnv(gym.Env):
     def _job_points(self) -> tuple[tuple[float, float], tuple[float, float]]:
         return pair_ground_points(self.rng, self.active_points, self.world.coverage_radius_m(), self.far_job_p)
 
+    def _jobs(self):
+        if self.job_catalog is None:
+            from example.jobs import catalog
+
+            self.job_catalog = catalog()
+        return self.job_catalog
+
     def _sample_jobs(self, n: int) -> dict[str, dict]:
-        jobs: dict[str, dict] = {}
-        for i in range(max(0, n)):
-            work = int(self.rng.integers(1, 5))
-            slack = int(self.rng.integers(2, 8))
-            release = int(self.rng.integers(0, max(1, self.steps_total - work - slack)))
-            deadline = min(self.steps_total, release + work + slack)
-            kind = "downlink" if self.rng.random() < 0.25 else "relay"
-            priority = int(self.rng.choice([1, 2, 3], p=[0.3, 0.4, 0.3]))
-            point_a, point_b = self._job_points()
-            job_id = f"J{i:03d}"
-            jobs[job_id] = {
-                "id": job_id,
-                "kind": kind,
-                "release_step": release,
-                "deadline_step": deadline,
-                "work_steps": work,
-                "remaining_steps": work,
-                "completed_step": None,
-                "priority": priority,
-                "value_usd": round(float(self.rng.uniform(15.0, 40.0 * priority)), 2),
-                "point_a": point_a,
-                "point_b": point_b,
-                "eligible_satellites": list(self.sat_ids),
-            }
-        return jobs
+        return self._jobs().sample_initial(self.rng, self, n)
 
     def _deliver_events(self) -> None:
         k = self.k
@@ -496,6 +451,7 @@ class OpsEnv(gym.Env):
         cfg = self.events_cfg
         if cfg.p_add_jobs and self.rng.random() < cfg.p_add_jobs:
             self._emit_add_jobs(k)
+
         if cfg.p_outage and self.rng.random() < cfg.p_outage:
             self._emit_outage(k)
 
@@ -508,10 +464,11 @@ class OpsEnv(gym.Env):
         if typ == "add_jobs":
             for job in event.get("jobs", []):
                 live = dict(job, remaining_steps=job["work_steps"], completed_step=None)
-                if live.get("point_a") is None or live.get("point_b") is None:
+                if live.get("addressed") is None and (live.get("point_a") is None or live.get("point_b") is None):
                     point_a, point_b = self._job_points()
                     live.setdefault("point_a", point_a)
                     live.setdefault("point_b", point_b)
+                    live.setdefault("points", [live["point_a"], live["point_b"]])
                 live.setdefault("eligible_satellites", list(self.sat_ids))
                 self.jobs[job["id"]] = live
             self.ops_stats["events_add_jobs"] += 1.0
@@ -524,30 +481,8 @@ class OpsEnv(gym.Env):
 
     def _emit_add_jobs(self, k: int) -> None:
         lo, hi = self.events_cfg.add_jobs_count
-        jobs = []
-        for i in range(int(self.rng.integers(lo, hi + 1))):
-            work = int(self.rng.integers(1, 4))
-            slack = int(self.rng.integers(1, 7))
-            deadline = k + work + slack
-            if deadline > self.steps_total:
-                continue
-            kind = "downlink" if self.rng.random() < 0.25 else "relay"
-            priority = int(self.rng.choice([1, 2, 3], p=[0.3, 0.4, 0.3]))
-            point_a, point_b = self._job_points()
-            jobs.append(
-                {
-                    "id": f"{self._next_event_id()}-J{i}",
-                    "kind": kind,
-                    "release_step": k,
-                    "deadline_step": deadline,
-                    "work_steps": work,
-                    "priority": priority,
-                    "value_usd": round(float(self.rng.uniform(15.0, 40.0 * priority)), 2),
-                    "point_a": point_a,
-                    "point_b": point_b,
-                    "eligible_satellites": list(self.sat_ids),
-                }
-            )
+        count = int(self.rng.integers(lo, hi + 1))
+        jobs = self._jobs().sample_added(self.rng, self, k, count, self._next_event_id())
         if jobs:
             self._apply_event({"type": "add_jobs", "jobs": jobs})
 
@@ -593,6 +528,8 @@ class OpsEnv(gym.Env):
         for i, (kind, job_id) in enumerate(decoded):
             if kind == "job" and job_id is not None:
                 by_job.setdefault(job_id, []).append(i)
+
+        # Keep the previous executor, else the fullest battery. The rest go idle.
         forced_idle: set[int] = set()
         for job_id, holders in by_job.items():
             if len(holders) == 1:
@@ -610,17 +547,27 @@ class OpsEnv(gym.Env):
                 forced_idle.add(i)
                 conflicts += 1
             by_job[job_id] = holders[:1]
+
+        # Past the downlink cap, drop the lowest-priority passes.
         downlinks = [
             (job_id, holders[0])
             for job_id, holders in by_job.items()
             if holders and self.jobs[job_id]["kind"] == "downlink"
         ]
         if len(downlinks) > self.downlink_limit:
-            downlinks.sort(key=lambda p: (-self.jobs[p[0]]["priority"], self.jobs[p[0]]["deadline_step"], -self.jobs[p[0]]["value_usd"]))
+            downlinks.sort(
+                key=lambda p: (
+                    -self.jobs[p[0]]["priority"],
+                    self.jobs[p[0]]["deadline_step"],
+                    -float(self.jobs[p[0]].get("value_usd", 0.0)),
+                )
+            )
             for _, i in downlinks[self.downlink_limit :]:
                 decoded[i] = ("idle", None)
                 forced_idle.add(i)
                 conflicts += 1
+
+        # Hand a unique downlink to a satellite that was on a relay, then refill idle rows.
         self._yield_unique_downlinks(decoded, forced_idle)
         self._fill_forced_idle_with_relays(decoded, forced_idle)
         return decoded, conflicts
@@ -631,6 +578,7 @@ class OpsEnv(gym.Env):
             for kind, job_id in decoded
             if kind == "job" and job_id is not None and self.jobs[job_id]["kind"] == "downlink"
         ]
+        # Idle is the default, so only calibrate and job become commands.
         commands: dict[str, dict] = {}
         counts = {"idle": 0, "calibrate": 0, "job": 0}
         for i, (kind, job_id) in enumerate(decoded):
@@ -639,6 +587,8 @@ class OpsEnv(gym.Env):
                 commands[self.sat_ids[i]] = {"action": "calibrate"}
             elif kind == "job" and job_id is not None:
                 commands[self.sat_ids[i]] = {"action": "job", "job_id": job_id}
+
+        # Fresh calibration is the part of the window before calibrate_free_at.
         early = 0
         valid = max(self.calibration_valid, 1)
         for i, (kind, _) in enumerate(decoded):
@@ -658,12 +608,14 @@ class OpsEnv(gym.Env):
 
     @staticmethod
     def _job_pref(job: dict) -> tuple:
-        return (-job["priority"], job["deadline_step"], -job["value_usd"], job["id"])
+        return (-job["priority"], job["deadline_step"], -float(job.get("value_usd", 0.0)), job["id"])
 
     def _yield_unique_downlinks(self, decoded, forced_idle: set[int]) -> None:
         slots = self._slot_by_id()
         taken = {job_id for kind, job_id in decoded if kind == "job" and job_id is not None}
         n_downlinks = sum(1 for job_id in taken if self.jobs[job_id]["kind"] == "downlink")
+
+        # A downlink only one satellite can see, and that satellite is on a relay.
         unique = []
         for slot, cand in enumerate(self._candidates):
             job = cand.job
@@ -721,11 +673,14 @@ class OpsEnv(gym.Env):
         return out
 
     def summary(self) -> dict:
+        # Completions, misses, and the worst battery. Custom job fields append themselves.
         finished = [j for j in self.jobs.values() if j["completed_step"] is not None]
         due = [j for j in self.jobs.values() if j["deadline_step"] <= self.k]
         critical = [j for j in due if j["priority"] == 3]
         socs = [100.0 * sat.energy_wh / sat.capacity_wh for sat in self.fleet]
-        return {
+        from tools.jobs import job_field_summary
+
+        report = {
             "steps_executed": self.k,
             "jobs_total": len(self.jobs),
             "jobs_completed": len(finished),
@@ -733,12 +688,13 @@ class OpsEnv(gym.Env):
             "jobs_due_missed": sum(j["completed_step"] is None for j in due),
             "critical_jobs_due": len(critical),
             "critical_jobs_completed_on_time": sum(j["completed_step"] is not None for j in critical),
-            "revenue_usd": round(sum(j["value_usd"] for j in finished), 6),
             "blocked_command_count": sum(r["reason"] not in ("accepted", "idle") for r in self.trace),
             "below_reserve_satellite_steps": sum(r["below_reserve"] for r in self.trace),
             "brownout_satellite_steps": sum(r["brownout"] for r in self.trace),
             "minimum_soc_pct": round(min(socs, default=100.0), 6),
         }
+        report.update(job_field_summary(self))
+        return report
 
     def journal(self) -> dict:
         return {

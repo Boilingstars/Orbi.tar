@@ -1,10 +1,9 @@
-"""
-Dispatcher: job-slot sample and fleet (or cluster) addressing.
-"""
+"""Ground control for this package. Ranks open jobs into the fixed action slots."""
 
 from __future__ import annotations
 
 from orbi.env import _Candidate
+from orbi.satellite import job_visible
 
 
 class GroundControl:
@@ -29,15 +28,18 @@ class GroundControl:
     def has_contact(self, env, job: dict) -> bool:
         for sid in self._eligible(env, job):
             sat = env.sats[sid]
-            if sat.available(env.k) and env.world.sees_job(sat.index, job.get("point_a"), job.get("point_b")):
+            if sat.available(env.k) and job_visible(env.world, sat.index, job):
                 return True
         return False
 
     def job_rank(self, env, job: dict) -> tuple:
         k = env.k
         open_now = job["release_step"] <= k < job["deadline_step"]
+
+        # In contact now, then not yet visible, then already missed.
         if open_now and self.has_contact(env, job):
             return (0, -job["priority"], job["deadline_step"], job["remaining_steps"], job["id"])
+
         if job["release_step"] > k or open_now:
             kind_penalty = 0 if job["kind"] == "relay" else 1
             future = 0 if job["release_step"] > k else 1

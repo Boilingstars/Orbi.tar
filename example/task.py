@@ -1,24 +1,18 @@
-"""Задачи примера: priority и revenue на одном сценарии смены."""
+"""Package wiring. Supplies this package's reward and observation."""
 
 from __future__ import annotations
 
 from example.observation import ShiftObservation
-from example.reward import PriorityReward, RevenueReward
+from example.reward import MyReward
 from orbi.env import Task
 
-_REWARDS = {"priority": PriorityReward, "revenue": RevenueReward}
+
+def bind(reward=None, observation=None):
+    if isinstance(reward, type):
+        reward = reward()
+    return reward or MyReward(), observation or ShiftObservation()
 
 
-def bind(goal: str = "priority", reward=None, observation=None):
-    if goal not in _REWARDS:
-        raise ValueError(f"goal must be one of {tuple(_REWARDS)}")
-    if reward is None:
-        reward = _REWARDS[goal]()
-    if observation is None:
-        observation = ShiftObservation()
-    return reward, observation
-
-
-def make_task(scenario="p02", goal: str = "priority", **options) -> Task:
-    reward, observation = bind(goal)
+def make_task(scenario="p02", reward=None, observation=None, **options) -> Task:
+    reward, observation = bind(reward, observation)
     return Task(scenario, reward, observation, **options)

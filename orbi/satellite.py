@@ -5,8 +5,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-import numpy as np
-
 from orbi.constants import R_EARTH, SOLAR_CONSTANT
 
 
@@ -77,6 +75,7 @@ class Satellite:
     def payload_w(self, action: str, job: dict | None = None) -> float:
         if action == "calibrate":
             return self.calibration_w
+
         if action == "job" and job is not None:
             return self.downlink_w if job["kind"] == "downlink" else self.relay_w
         return 0.0
@@ -85,9 +84,12 @@ class Satellite:
         return self.panel_area_m2 * self.panel_efficiency * SOLAR_CONSTANT
 
     def transition(self, solar_w: float, payload_w: float, model: dict, dt: float) -> tuple[float, float, float, float]:
+        # Heater joins the base load. Payload is whatever the caller already chose.
         heater = self.heater_w if self.temp_c < model["heater_below_c"] else 0.0
         load_w = self.base_w + heater + payload_w
         delta = (solar_w - load_w) * dt / 3600.0
+
+        # Charge only inside the temperature window. Discharge always counts.
         if delta >= 0:
             if model["charge_min_c"] <= self.temp_c <= model["charge_max_c"]:
                 delta *= model["charge_efficiency"]
@@ -96,6 +98,8 @@ class Satellite:
         else:
             delta /= model["discharge_efficiency"]
         energy = self.energy_wh + delta
+
+        # Temperature relaxes toward the sun or eclipse target.
         target = model["sun_target_c"] if solar_w > 0 else model["eclipse_target_c"]
         equilibrium = target + model["thermal_gain_c_per_w"] * load_w
         temp = equilibrium + (self.temp_c - equilibrium) * math.exp(-dt / model["thermal_tau_s"])
@@ -105,16 +109,69 @@ class Satellite:
         """Physical take-job check. Subclasses add extra conditions."""
         if job is None:
             return False, "unknown_job"
+
         if not self.available(k):
             return False, "satellite_unavailable"
+
+        # The job must still be open and inside its window.
         if job["completed_step"] is not None or job["remaining_steps"] <= 0:
             return False, "already_completed"
+
         if not job["release_step"] <= k < job["deadline_step"]:
             return False, "outside_job_window"
+
         if self.calibration_age_steps >= model["calibration_valid_steps"]:
             return False, "calibration_required"
-        point_a = job.get("point_a")
-        point_b = job.get("point_b")
-        if point_a is None or point_b is None or not world.sees_job(self.index, point_a, point_b):
-            return False, "no_contact"
+
+        # Addressed jobs name one satellite. The others need line of sight.
+        if not job_visible(world, self.index, job):
+            reason = "not_addressed" if _is_addressed(job) else "no_contact"
+            return False, reason
         return True, "accepted"
+
+
+def job_points(job: dict) -> list[tuple]:
+    """Ground points a job asks the satellite to see.
+
+    A list longer than two is the full chain (A, B, C, ...). Otherwise an
+    explicit `point_a` / `point_b` pair wins, so a caller can overwrite them.
+    """
+    listed = [tuple(point) for point in job.get("points") or []]
+
+    if len(listed) > 2:
+        return listed
+
+    point_a, point_b = job.get("point_a"), job.get("point_b")
+
+    if point_a is not None or point_b is not None:
+        points = []
+
+        if point_a is not None:
+            points.append(tuple(point_a))
+            
+        if point_b is not None:
+            points.append(tuple(point_b))
+        return points
+    return listed
+
+
+def _is_addressed(job: dict) -> bool:
+    return job.get("addressed") is not None and not job_points(job)
+
+
+def job_visible(world, sat_index: int, job: dict) -> bool:
+    """True when this satellite meets the job's visibility or address condition."""
+    if _is_addressed(job):
+        return int(sat_index) == int(job["addressed"])
+
+    points = job_points(job)
+
+    if not points:
+        return False
+
+    if len(points) == 1:
+        return bool(world.sees_job(sat_index, points[0], points[0]))
+
+    if len(points) == 2:
+        return bool(world.sees_job(sat_index, points[0], points[1]))
+    return all(world.sees_job(sat_index, point, point) for point in points)

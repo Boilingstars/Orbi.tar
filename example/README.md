@@ -6,7 +6,7 @@ A shift dispatcher on Orbi.tar. Physics is shared: charge, temperature, calibrat
 - `revenue` — `value_usd` is credited when the job completes. Priority stays in the metrics.
 
 ```bash
-py -3 -m example.train --scenario p02 --goal priority --timesteps 200000
+py -3 -m example.train
 py -3 -m example.evaluate --scenario p02 --policy greedy --events none
 py -3 -m example.baseline --scenario p02 --goal priority
 ```
@@ -37,9 +37,8 @@ A satellite action is a job slot, idle, or calibrate. The previous job is not lo
 
 `controller=ctde` keeps that critic and replaces the actor with a shared on-board network: own `sats[i]`, the job table, own edges, and `neighbors[i]`. Fleet mean/min SoC are zeroed for the actor. MaskablePPO and the `N × (K+2)` action stay the same.
 
-Weights do not depend on fleet size: a model trained on 48 plays on 16. Profile `full` is width 128 with two blocks. `light` is for a short CPU check. Network code: [policy.py](policy.py).
+Weights do not depend on fleet size: a model trained on 48 plays on 16. Profile `full` is width 128 with two blocks. `light` is for a short CPU check. Network code: [models.py](models.py).
 
 ```bash
-py -3 -m example.train --controller ctde --neighbor-method competitors
-py -3 -m example.train --baseline-repair
+py -3 -m example.train
 ```

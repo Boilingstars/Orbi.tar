@@ -53,7 +53,7 @@ x-checkpoint:
   host_path: agent/runs/10_prior_smart_repair/checkpoints/ckpt_68120.zip
   run: 10_prior_smart_repair
   goal: priority
-  policy: example.policy.OpsAttentionPolicy
+  policy: example.models.OpsAttentionPolicy
   sample: true
 
 x-checkpoint-alt:
@@ -62,7 +62,7 @@ x-checkpoint-alt:
   host_path: agent/runs/20260922-095910_P02_shift_revenue/checkpoints/ckpt_35714.zip
   run: 20260922-095910_P02_shift_revenue
   goal: revenue
-  policy: example.policy.OpsAttentionPolicy
+  policy: example.models.OpsAttentionPolicy
   sample: true
 
 paths:

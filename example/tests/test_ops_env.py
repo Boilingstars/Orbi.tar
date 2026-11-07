@@ -128,6 +128,9 @@ def test_jobs_use_active_ground_points():
     env.reset(seed=0)
     assert len(env.active_points) == 8
     for job in env.jobs.values():
+        if job.get("addressed") is not None and not job.get("points"):
+            assert job["point_a"] is None and len(job["eligible_satellites"]) == 1
+            continue
         a, b = job["point_a"], job["point_b"]
         assert any(abs(a[0] - p[0]) < 1e-9 and abs(a[1] - p[1]) < 1e-9 for p in env.active_points)
         assert any(abs(b[0] - p[0]) < 1e-9 and abs(b[1] - p[1]) < 1e-9 for p in env.active_points)
@@ -137,7 +140,7 @@ def test_no_contact_blocks_job():
     env = _env("p01")
     env.reset(seed=0)
     sid = env.sat_ids[0]
-    job = next(iter(env.jobs.values()))
+    job = next(j for j in env.jobs.values() if len(j.get("points") or []) <= 2 and j.get("point_a") is not None)
     job["point_a"] = (1.2, 0.0)
     job["point_b"] = (-1.2, 0.0)
     env.sats[sid].calibration_age_steps = 0
