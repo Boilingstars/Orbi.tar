@@ -127,6 +127,31 @@ def test_ground_control_visible_outranks_worth():
         assert control.job_rank(env, cheap) < control.job_rank(env, rich)
 
 
+def test_executable_job_is_not_displaced():
+    env = _env()
+    env.reset(seed=0)
+    first, second = env.sat_ids[:2]
+    rich = _inject_relay(env, [first], "RL-rich")
+    poor = _inject_relay(env, [second], "RL-poor")
+    env.jobs[rich]["value_usd"] = 500.0
+    env.jobs[poor]["value_usd"] = 1.0
+    env.sats[first].calibration_age_steps = env.calibration_valid
+    env._job_views = {}
+    control = GroundControl(top_k=1)
+    picked = control.select_jobs(env, [env.jobs[rich], env.jobs[poor]])
+    assert [cand.job_id for cand in picked] == [poor]
+    assert control.job_rank(env, env.jobs[poor]) < control.job_rank(env, env.jobs[rich])
+
+
+def test_packed_job_keeps_every_eligible_satellite():
+    env = _env()
+    env.reset(seed=0)
+    sats = env.sat_ids[:2]
+    job_id = _inject_relay(env, sats, "RL-both")
+    picked = GroundControl(top_k=4).select_jobs(env, [env.jobs[job_id]])
+    assert picked[0].sats == [0, 1]
+
+
 def test_ground_control_top_k_and_cluster():
     env = _env()
     env.reset(seed=0)

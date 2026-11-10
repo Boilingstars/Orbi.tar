@@ -423,6 +423,9 @@ def _match(pointer, h_s, h_j, edges, jobs, masks, obs, deterministic=False, acti
     prio = jobs[..., 0:3] @ torch.tensor([1.0, 2.0, 3.0], device=device, dtype=pair.dtype)
     job_priority = legal_pair.max(dim=1).values + 0.5 * prio
     job_priority = job_priority.masked_fill(~job_valid, _NEG)
+
+    # Order follows the current scores. After a weight update the same joint
+    # assignment can be factored in a different order. That replay gap stays open.
     order = job_priority.argsort(dim=-1, descending=True)
 
     free = sat_valid.clone()
@@ -452,10 +455,10 @@ def _match(pointer, h_s, h_j, edges, jobs, masks, obs, deterministic=False, acti
         sat_ok = sat_ok & free & slot_ok.unsqueeze(1)
         sat_ok = sat_ok & (~slot_down.unsqueeze(1) | (downs < caps).unsqueeze(1))
         logits = torch.cat([slot_scores, slot_skip.unsqueeze(1)], dim=-1)
-        # Sample/eval never skip a legal satellite. Replay must still score a stored skip.
-        can_skip = ~sat_ok.any(dim=-1, keepdim=True)
-        if actions is not None:
-            can_skip = torch.ones_like(can_skip)
+
+        # Skip is a real outcome on a live slot, and the only one on an empty slot.
+        # Sample and replay use this same mask.
+        can_skip = slot_ok.unsqueeze(1) | ~sat_ok.any(dim=-1, keepdim=True)
         allow, _ = _open(torch.cat([sat_ok, can_skip], dim=-1))
         dist = MaskableCategorical(logits=logits, masks=allow)
 
@@ -464,9 +467,7 @@ def _match(pointer, h_s, h_j, edges, jobs, masks, obs, deterministic=False, acti
             has = took.any(dim=-1)
             pick = torch.where(has, took.to(torch.long).argmax(dim=-1), torch.full((b,), n, device=device, dtype=torch.long))
         elif deterministic:
-            # Inference assigns the best legal satellite. Skip only when the slot is empty.
-            best = slot_scores.masked_fill(~sat_ok, _NEG).argmax(-1)
-            pick = torch.where(sat_ok.any(dim=-1), best, torch.full((b,), n, device=device, dtype=torch.long))
+            pick = logits.masked_fill(~allow, _NEG).argmax(-1)
         else:
             pick = dist.sample()
 

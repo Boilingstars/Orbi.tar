@@ -35,7 +35,8 @@ def job_view(env, job: dict, sat_ids: list[str] | None = None) -> dict:
     period = float(np.mean(env.world.periods_s)) if env.n_sats else 1.0
     dt = max(float(getattr(env, "dt", 300.0)), 1.0)
     visible: list[int] = []
-    remaining_s = 0.0
+    windows: dict[int, tuple[float, float]] = {}
+    remainings: list[float] = []
     for sid in ids:
         sat = env.sats.get(sid)
         if sat is None or not sat.available(env.k):
@@ -45,20 +46,26 @@ def job_view(env, job: dict, sat_ids: list[str] | None = None) -> dict:
             if int(sat.index) != int(job["addressed"]):
                 continue
             visible.append(sat.index)
+            windows[sat.index] = (dt, 0.0)
+            remainings.append(dt)
             continue
 
-        if job_visible(env.world, sat.index, job):
-            visible.append(sat.index)
+        if not points or not job_visible(env.world, sat.index, job):
+            continue
+
+        # Seconds left in this joint pass. The rise after a gap is filled on packed edges.
+        remaining, _nxt = env.world.access_windows(sat.index, points, env.world.t)
+        visible.append(sat.index)
+        windows[sat.index] = (float(remaining), 0.0)
+        remainings.append(float(remaining))
 
     n_visible = len(visible)
-    next_s = 0.0 if n_visible else period
-    if n_visible:
-        remaining_s = dt
     return {
         "n_visible": n_visible,
-        "remaining_s": float(remaining_s),
-        "next_s": float(next_s),
+        "remaining_s": float(min(remainings) if remainings else 0.0),
+        "next_s": 0.0 if n_visible else period,
         "visible": visible,
+        "windows": windows,
     }
 
 
@@ -131,14 +138,23 @@ def collect(env, control) -> dict:
             job = cand.job
             view = views.get(job["id"]) or job_view(env, job, control.sat_ids)
             uniqueness = view["n_visible"] / max(env.n_sats, 1)
+            points = job_points(job)
+            addressed = job.get("addressed") is not None and not points
+            sat_windows = view.get("windows") or {}
             edges = []
             for i in cand.sats:
                 sat = env.fleet[i]
                 ok, reason, _ = env.can_execute(sat.sat_id, {"action": "job", "job_id": job["id"]})
                 sees = i in view["visible"] if "visible" in view else bool(job_visible(env.world, i, job))
-                remaining_s, next_s = 0.0, period
-                if sees:
-                    remaining_s, next_s = float(view.get("remaining_s") or dt), 0.0
+                stored = sat_windows.get(i)
+
+                # A satellite already in view keeps that pass. The others get time to the next rise.
+                if stored is not None:
+                    remaining_s, next_s = stored
+                elif addressed or not points:
+                    remaining_s, next_s = (dt, 0.0) if sees else (0.0, period)
+                else:
+                    remaining_s, next_s = env.world.access_windows(i, points, env.world.t)
                 edges.append(
                     {
                         "sat": i,

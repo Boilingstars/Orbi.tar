@@ -69,7 +69,7 @@ class Run:
     scenario: str = "p03"
     timesteps: int = 120_000
     n_envs: int = 8
-    top_k: int | None = None
+    top_k: int | None = 64
     seed: int = 0
     profile: str = "full"
     events: bool = True
@@ -83,7 +83,7 @@ class Run:
     max_steps: int | None = None
     tensorboard: bool = False
     subproc: bool = True
-    load: str | None = "/root/Orbi.tar/experiments/runs/09_11_26_20_36_example_dispatcher/checkpoints/ckpt_88064.zip"
+    load: str | None = None
     save: str | None = None
     run_dir: str | None = None
     resume: bool = False

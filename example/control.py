@@ -36,6 +36,25 @@ class GroundControl:
     def has_contact(self, env, job: dict) -> bool:
         return self._view(env, job)["n_visible"] > 0
 
+    def _executable(self, env, job: dict) -> int:
+        """How many eligible satellites can take the job on this tick. Cached for the sort."""
+        step = int(env.k)
+        cache = getattr(self, "_executable_cache", None)
+        if cache is None or cache[0] != step:
+            cache = (step, {})
+            self._executable_cache = cache
+        stored = cache[1].get(job["id"])
+        if stored is not None:
+            return stored
+
+        action = {"action": "job", "job_id": job["id"]}
+        count = 0
+        for sid in self._eligible(env, job):
+            ok, _reason, _power = env.can_execute(sid, action)
+            count += int(ok)
+        cache[1][job["id"]] = count
+        return count
+
     def job_rank(self, env, job: dict) -> tuple:
         k = env.k
         open_now = job["release_step"] <= k < job["deadline_step"]
@@ -43,15 +62,19 @@ class GroundControl:
         view = self._view(env, job)
         n_visible = int(view["n_visible"])
         remaining_s = float(view["remaining_s"])
+        n_executable = self._executable(env, job)
 
-        # Visible work first. Closing windows, then uniqueness; dollars are a tie-break.
+        # A satellite that can take it now, then a contact that cannot, then the rest.
+        if open_now and n_executable > 0:
+            return (0, remaining_s, n_executable, -score, job["deadline_step"], job["id"])
+
         if open_now and n_visible > 0:
-            return (0, remaining_s, n_visible, -score, job["deadline_step"], job["id"])
+            return (1, remaining_s, n_visible, -score, job["deadline_step"], job["id"])
 
         if job["release_step"] > k or open_now:
-            return (1, -score, job["deadline_step"], job["id"])
+            return (2, -score, job["deadline_step"], job["id"])
 
-        return (2, job["deadline_step"], -score, job["id"])
+        return (3, job["deadline_step"], -score, job["id"])
 
     def select_jobs(self, env, known: list[dict]) -> list[_Candidate]:
         ranked = sorted(known, key=lambda job: self.job_rank(env, job))

@@ -18,6 +18,68 @@ def _all_idle(env: OpsEnv) -> np.ndarray:
     return np.full(env.N, env.idle_index, dtype=np.int64)
 
 
+def test_top_k_sets_the_action_mask():
+    env = _env("p01", top_k=64)
+    obs, _ = env.reset(seed=0)
+    assert env.K == 64
+    assert obs["mask"].shape == (env.N, env.K + 2)
+    assert obs["jobs"].shape == (64, obs["jobs"].shape[-1])
+    assert obs["edges"].shape[:2] == (env.N, 64)
+    assert env.action_space.nvec.shape == (env.N,)
+    assert int(env.action_space.nvec[0]) == 66
+
+
+def test_contact_window_matches_kepler_and_does_not_move_time():
+    from example.control import GroundControl
+    from tools.observation import collect, job_view
+
+    env = _env("p01")
+    env.reset(seed=0)
+    t0 = float(env.world.t)
+    # A point ahead of the ground track stays in view for more than one tick.
+    lat, lon, _alt = env.world.lla(0, t=t0 + 400.0)
+    points = ((lat, lon), (lat, lon))
+    other = next(i for i in range(1, env.n_sats) if not env.world.sees_job(i, points[0], points[1]))
+    for job in env.jobs.values():
+        job["deadline_step"] = 0
+    live = {
+        "id": "WIN",
+        "kind": "relay",
+        "release_step": 0,
+        "deadline_step": env.steps_total,
+        "work_steps": 2,
+        "remaining_steps": 2,
+        "completed_step": None,
+        "eligible_satellites": [env.sat_ids[0], env.sat_ids[other]],
+        "priority": 3,
+        "value_usd": 10.0,
+        "point_a": points[0],
+        "point_b": points[1],
+    }
+    env.jobs["WIN"] = live
+
+    # Overhead pass is longer than one tick, and reading it does not advance the world.
+    view = job_view(env, live)
+    remaining, nxt = env.world.access_windows(0, points, t0)
+    assert 0 in view["visible"]
+    assert abs(view["windows"][0][0] - float(remaining)) < 1e-4
+    assert view["next_s"] == 0.0
+    assert float(remaining) > env.dt + 1.0
+    assert float(nxt) == 0.0
+    assert env.world.t == t0
+
+    raw = collect(env, GroundControl(top_k=4))
+    slot = next(item for item in raw["slots"] if item["job"]["id"] == "WIN")
+    by_sat = {edge["sat"]: edge for edge in slot["edges"]}
+    far_remaining, far_next = env.world.access_windows(other, points, t0)
+    assert abs(by_sat[0]["remaining_s"] - float(remaining)) < 1e-4
+    assert by_sat[0]["next_s"] == 0.0
+    assert abs(by_sat[other]["next_s"] - float(far_next)) < 1e-4
+    assert by_sat[other]["remaining_s"] == float(far_remaining)
+    assert by_sat[0]["sees"] and not by_sat[other]["sees"]
+    assert env.world.t == t0
+
+
 def test_spaces_and_padding():
     env = _env("p01")
     obs, _ = env.reset(seed=0)

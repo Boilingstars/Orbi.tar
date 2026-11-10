@@ -184,9 +184,7 @@ def test_pair_scores_read_window_columns():
     assert not torch.allclose(a, b)
 
 
-def test_stochastic_matching_does_not_skip_legal_slots():
-    from example.models import _match
-
+def _skip_pointer(skip: float):
     class SkipPointer:
         def pair_scores(self, h_s, h_j, edges):
             return torch.zeros(h_s.shape[0], h_s.shape[1], h_j.shape[1], device=h_s.device)
@@ -195,22 +193,50 @@ def test_stochastic_matching_does_not_skip_legal_slots():
             b, n, _ = h_s.shape
             k = h_j.shape[1]
             z = h_s.new_zeros
-            return z((b, n)) - 8, z((b, n)) - 8, z((b, k)) + 8
+            return z((b, n)) - 8, z((b, n)) - 8, z((b, k)) + skip
+
+    return SkipPointer()
+
+
+def _legal_slots(env, obs):
+    mask = np.asarray(obs["mask"], dtype=bool)
+    return np.flatnonzero(mask[: env.n_sats, : env.K].any(axis=0)), mask
+
+
+def test_high_skip_can_leave_a_legal_slot():
+    from example.models import _match
 
     env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
     obs, _ = env.reset(seed=0)
     batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
-    mask = np.asarray(obs["mask"], dtype=bool)
-    legal_slots = np.flatnonzero(mask[: env.n_sats, : env.K].any(axis=0))
+    legal_slots, mask = _legal_slots(env, obs)
     if legal_slots.size == 0:
         return
     h_s = torch.zeros(1, env.N, 8)
     h_j = torch.zeros(1, env.K, 8)
     torch.manual_seed(0)
     with torch.no_grad():
-        picked, _, _, _ = _match(SkipPointer(), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, False)
-    assigned = set(int(x) for x in picked[0, : env.n_sats].tolist() if int(x) < env.K)
-    assert legal_slots[0] in assigned or any(slot in assigned for slot in legal_slots)
+        picked, _, _, _ = _match(_skip_pointer(8.0), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, False)
+    assigned = {int(x) for x in picked[0, : env.n_sats].tolist() if int(x) < env.K}
+    assert not any(int(slot) in assigned for slot in legal_slots)
+
+
+def test_low_skip_still_assigns_a_legal_satellite():
+    from example.models import _match
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    legal_slots, mask = _legal_slots(env, obs)
+    if legal_slots.size == 0:
+        return
+    h_s = torch.zeros(1, env.N, 8)
+    h_j = torch.zeros(1, env.K, 8)
+    torch.manual_seed(0)
+    with torch.no_grad():
+        picked, _, _, _ = _match(_skip_pointer(-8.0), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, False)
+    assigned = {int(x) for x in picked[0, : env.n_sats].tolist() if int(x) < env.K}
+    assert any(int(slot) in assigned for slot in legal_slots)
 
 
 def test_evaluate_can_score_a_stored_skip():
@@ -251,30 +277,57 @@ def test_kl_budget_is_per_satellite():
     assert _action_rows(_Dummy()) == 48
 
 
-def test_deterministic_matching_assigns_legal_jobs():
+def test_deterministic_matching_follows_the_skip_logit():
     from example.models import _match
-
-    class SkipPointer:
-        def pair_scores(self, h_s, h_j, edges):
-            return torch.zeros(h_s.shape[0], h_s.shape[1], h_j.shape[1], device=h_s.device)
-
-        def side_scores(self, h_s, h_j):
-            b, n, _ = h_s.shape
-            k = h_j.shape[1]
-            z = h_s.new_zeros
-            return z((b, n)) + 8, z((b, n)) + 8, z((b, k)) + 8
 
     env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
     obs, _ = env.reset(seed=0)
     batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
-    mask = np.asarray(obs["mask"], dtype=bool)
+    legal_slots, mask = _legal_slots(env, obs)
+    if legal_slots.size == 0:
+        return
     h_s = torch.zeros(1, env.N, 8)
     h_j = torch.zeros(1, env.K, 8)
     with torch.no_grad():
-        picked, _, _, _ = _match(SkipPointer(), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, True)
-    jobs = int((picked[0, : env.n_sats] < env.K).sum())
-    legal = int(mask[: env.n_sats, : env.K].any())
-    assert jobs > 0 or not legal
+        low, _, _, _ = _match(_skip_pointer(-8.0), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, True)
+        high, _, _, _ = _match(_skip_pointer(8.0), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, True)
+    low_jobs = {int(x) for x in low[0, : env.n_sats].tolist() if int(x) < env.K}
+    high_jobs = {int(x) for x in high[0, : env.n_sats].tolist() if int(x) < env.K}
+    assert any(int(slot) in low_jobs for slot in legal_slots)
+    assert not any(int(slot) in high_jobs for slot in legal_slots)
+
+
+def test_pointer_and_encoder_receive_grad():
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    net = OpsAttentionNet(**_SMALL)
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    mask = np.asarray(obs["mask"], dtype=bool)
+    torch.manual_seed(0)
+    actions, value, _logp = net.act(batch, mask, deterministic=False)
+    _value, logp, entropy = net.evaluate(batch, actions.detach(), mask)
+    loss = -logp.mean() - 0.01 * entropy.mean() + value.mean()
+    loss.backward()
+    pointer = [p.grad for p in net.pointer.parameters() if p.grad is not None]
+    encoder = [p.grad for p in net.encoder.parameters() if p.grad is not None]
+    assert pointer and any(float(grad.abs().sum()) > 0 for grad in pointer)
+    assert encoder and any(float(grad.abs().sum()) > 0 for grad in encoder)
+
+
+def test_replay_log_prob_matches_the_sample():
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    net = OpsAttentionNet(**_SMALL).eval()
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    mask = np.asarray(obs["mask"], dtype=bool)
+    for seed in range(4):
+        torch.manual_seed(seed)
+        with torch.no_grad():
+            actions, _, sampled = net.act(batch, mask, deterministic=False)
+            _, replayed, _ = net.evaluate(batch, actions, mask)
+        assert torch.allclose(sampled, replayed, atol=1e-5)
+        ratio = torch.exp(replayed - sampled)
+        assert torch.allclose(ratio, torch.ones_like(ratio), atol=1e-4)
 
 
 def test_matching_short_window_can_beat_worth():
