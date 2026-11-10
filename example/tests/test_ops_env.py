@@ -120,11 +120,12 @@ def test_p02_padding_and_job_sample():
     obs, _ = env.reset(seed=0)
     assert env.n_sats == 48
     assert env.jobs
+    assert env.ground_region is None
     assert not obs["sats"][env.n_sats :].any()
 
 
 def test_jobs_use_active_ground_points():
-    env = _env("p01", ground_points=8, far_job_p=0.5)
+    env = _env("p01", ground_points=8, job_difficulty=0.0)
     env.reset(seed=0)
     assert len(env.active_points) == 8
     for job in env.jobs.values():
@@ -147,3 +148,11 @@ def test_no_contact_blocks_job():
     env.k = job["release_step"]
     ok, reason, _ = env.can_execute(sid, {"action": "job", "job_id": job["id"]})
     assert not ok and reason == "no_contact"
+
+
+def test_packed_slots_set_ever_packed():
+    env = _env("p01")
+    env.reset(seed=0)
+    packed = [cand.job for cand in env._candidates]
+    assert packed
+    assert all(job.get("ever_packed") for job in packed)

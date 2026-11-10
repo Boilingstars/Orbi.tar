@@ -26,6 +26,9 @@
     "eclipse_target_c": 5.0,
     "min_elevation_deg": 10.0
   },
+  "ground": {
+    "region": "world"
+  },
   "jobs": {
     "initial": 40
   },

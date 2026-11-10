@@ -5,17 +5,32 @@ from __future__ import annotations
 import numpy as np
 
 from example.control import GroundControl
+from example.jobs import PRICE_DIV, work_span_ticks
+from example.reward import job_worth
 from example.satellite import NeighborView
-from orbi.env import EDGE_FEATURES, JOB_FEATURES, NEIGHBOR_FEATURES, PLAN_MAX, SAT_FEATURES
+from orbi.env import (
+    EDGE_FEATURES,
+    GLOBAL_DOWNLINK_CAP,
+    GLOBAL_FEATURES,
+    JOB_FEATURES,
+    N_MAX,
+    NEIGHBOR_FEATURES,
+    PLAN_MAX,
+    SAT_FEATURES,
+)
 from tools.observation import Observation, collect
 
-_HORIZON = 24.0
-_WORK_SCALE = 4.0
+# Sun and eclipse windows are a fraction of an orbit, not of the shift.
+_LIGHT_HORIZON = 24.0
+_WORTH_OBS = 100.0 / PRICE_DIV
 
 
 class ShiftObservation(Observation):
     def encode(self, env) -> dict:
-        return self._present(env, collect(env, self._control(env)))
+        raw = collect(env, self._control(env))
+        for cand in getattr(env, "_candidates", []) or []:
+            cand.job["ever_packed"] = True
+        return self._present(env, raw)
 
     def _control(self, env) -> GroundControl:
         if env.ground_control is None:
@@ -29,23 +44,29 @@ class ShiftObservation(Observation):
 
     def _job_features(self, env, job: dict, k: int) -> tuple[float, ...]:
         done = 1.0 - job["remaining_steps"] / job["work_steps"]
-        slack = job["deadline_step"] - k - job["remaining_steps"]
-        to_release = max(job["release_step"] - k, 0)
+        span = max(float(env.steps_total), 1.0)
+        work = max(float(job["work_steps"]), 1.0)
+        slack = (job["deadline_step"] - k - job["remaining_steps"]) / span
+        slack_work = (job["deadline_step"] - k - job["remaining_steps"]) / work
+        to_release = max(job["release_step"] - k, 0) / span
+        time_left = max(job["deadline_step"] - k, 0) / span
         priority = job["priority"]
+        fleet = max(env.n_sats, 1)
         return (
             float(priority == 1),
             float(priority == 2),
             float(priority == 3),
-            float(job.get("value_usd", 0.0)) / 100.0,
+            float(np.clip(job_worth(job) / _WORTH_OBS, -5.0, 5.0)),
             done,
-            min(job["remaining_steps"], _WORK_SCALE) / _WORK_SCALE,
-            float(np.clip(slack / _WORK_SCALE, -1.0, 1.0)),
-            min(max(job["deadline_step"] - k, 0), _HORIZON) / _HORIZON,
+            job["remaining_steps"] / work_span_ticks(env),
+            float(np.clip(slack, -1.0, 1.0)),
+            float(np.clip(time_left, 0.0, 1.0)),
             float(job["kind"] == "downlink"),
             float(job["kind"] == "relay"),
-            len(job["eligible_satellites"]) / env.n_sats,
+            len(job["eligible_satellites"]) / fleet,
             float(env._last_executor.get(job["id"]) is not None),
-            min(to_release, _HORIZON) / _HORIZON,
+            float(np.clip(to_release, 0.0, 1.0)),
+            float(np.clip(slack_work, -2.0, 4.0)),
         )
 
     def _present(self, env, raw: dict) -> dict[str, np.ndarray]:
@@ -68,14 +89,15 @@ class ShiftObservation(Observation):
                 float(row["contact"]),
                 float(row["contact"]),
                 row["solar_w"] / 100.0,
-                min(row["to_dark"], _HORIZON) / _HORIZON,
-                min(row["to_sun"], _HORIZON) / _HORIZON,
+                min(row["to_dark"], _LIGHT_HORIZON) / _LIGHT_HORIZON,
+                min(row["to_sun"], _LIGHT_HORIZON) / _LIGHT_HORIZON,
                 row["capacity_wh"] / 200.0,
                 float(row["heater_w"] > 0.0),
                 (row["solar_w"] - row["base_w"] - row["heater_w"]) / 100.0,
             )
 
-        # The plan is every unfinished job. Slots are only the ones the dispatcher packed.
+        # The plan is unfinished work that did not fit in the action slots.
+        period = max(float(raw.get("period_s") or 1.0), 1.0)
         for row, job in enumerate(raw["plan_jobs"][:PLAN_MAX]):
             plan[row] = self._job_features(env, job, k)
         for slot, item in enumerate(raw["slots"]):
@@ -88,21 +110,22 @@ class ShiftObservation(Observation):
                     float(edge["reason"] != "energy_reserve"),
                     float(edge["sees"]),
                     float(edge["last_executor"]),
+                    min(float(edge.get("remaining_s", 0.0)), period) / period,
+                    min(float(edge.get("next_s", period)), period) / period,
+                    float(edge.get("uniqueness", 0.0)),
                 )
 
         # Fleet totals, then each satellite's neighbor memory.
         soc = raw["soc"]
-        glob = np.array(
-            [
-                env.k / env.steps_total,
-                min(len(raw["open_jobs"]), 64) / 64.0,
-                min(raw["n_prio3"], 32) / 32.0,
-                min(raw["downlink_demand"] / env.downlink_limit, 2.0),
-                float(soc.mean()) if env.n_sats else 0.0,
-                float(soc.min()) if env.n_sats else 0.0,
-            ],
-            dtype=np.float32,
-        )
+        fleet = max(env.n_sats, 1)
+        glob = np.zeros(GLOBAL_FEATURES, dtype=np.float32)
+        glob[0] = env.k / env.steps_total
+        glob[1] = min(len(raw["open_jobs"]), 4 * fleet) / (4 * fleet)
+        glob[2] = min(raw["n_prio3"], 2 * fleet) / (2 * fleet)
+        glob[3] = raw["downlink_demand"] / fleet
+        glob[GLOBAL_DOWNLINK_CAP] = env.downlink_limit / N_MAX
+        glob[5] = float(soc.mean()) if env.n_sats else 0.0
+        glob[6] = float(soc.min()) if env.n_sats else 0.0
         view = self._neighbors(env)
         neighbors = (
             np.zeros((env.N, view.memory, NEIGHBOR_FEATURES), dtype=np.float32)

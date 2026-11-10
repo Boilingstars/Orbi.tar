@@ -214,7 +214,7 @@ def compare_runs(runs: list[Path | str]) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Training plots from progress.csv")
-    parser.add_argument("--run", action="append", required=True, help="agent/runs/<run> directory")
+    parser.add_argument("--run", action="append", required=True, help="experiments/runs/<run> directory")
     args = parser.parse_args()
     made: list[Path] = []
     for run in args.run:

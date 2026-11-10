@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from example.reward import job_worth
 from orbi.env import _Candidate
-from orbi.satellite import job_visible
+from tools.observation import job_view
 
 
 class GroundControl:
@@ -25,26 +26,32 @@ class GroundControl:
             ids = [sid for sid in ids if sid in self._cluster]
         return ids
 
+    def _view(self, env, job: dict) -> dict:
+        cached = getattr(env, "_job_views", None) or {}
+        view = cached.get(job["id"])
+        if view is not None:
+            return view
+        return job_view(env, job, self.sat_ids)
+
     def has_contact(self, env, job: dict) -> bool:
-        for sid in self._eligible(env, job):
-            sat = env.sats[sid]
-            if sat.available(env.k) and job_visible(env.world, sat.index, job):
-                return True
-        return False
+        return self._view(env, job)["n_visible"] > 0
 
     def job_rank(self, env, job: dict) -> tuple:
         k = env.k
         open_now = job["release_step"] <= k < job["deadline_step"]
+        score = job_worth(job)
+        view = self._view(env, job)
+        n_visible = int(view["n_visible"])
+        remaining_s = float(view["remaining_s"])
 
-        # In contact now, then not yet visible, then already missed.
-        if open_now and self.has_contact(env, job):
-            return (0, -job["priority"], job["deadline_step"], job["remaining_steps"], job["id"])
+        # Visible work first. Closing windows, then uniqueness; dollars are a tie-break.
+        if open_now and n_visible > 0:
+            return (0, remaining_s, n_visible, -score, job["deadline_step"], job["id"])
 
         if job["release_step"] > k or open_now:
-            kind_penalty = 0 if job["kind"] == "relay" else 1
-            future = 0 if job["release_step"] > k else 1
-            return (1, kind_penalty, future, job["release_step"], -job["priority"], job["deadline_step"], job["id"])
-        return (2, job["deadline_step"], -job["priority"], job["id"])
+            return (1, -score, job["deadline_step"], job["id"])
+
+        return (2, job["deadline_step"], -score, job["id"])
 
     def select_jobs(self, env, known: list[dict]) -> list[_Candidate]:
         ranked = sorted(known, key=lambda job: self.job_rank(env, job))

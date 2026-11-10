@@ -106,7 +106,7 @@ def test_maskable_ppo_short_learn_and_transfer(tmp_path):
     model.save(str(path))
 
     # Same model on 16 satellites without retraining.
-    play = OpsEnv(scenario=load(P01_INTRO), events=EventConfig.off(), seed=1)
+    play = OpsEnv(scenario=load(P01_INTRO), events=EventConfig.off(), seed=1, top_k=48)
     loaded = MaskablePPO.load(str(path))
     obs, _ = play.reset(seed=1)
     action, _ = loaded.predict(obs, action_masks=play.action_masks(), deterministic=True)
@@ -114,6 +114,251 @@ def test_maskable_ppo_short_learn_and_transfer(tmp_path):
     mask = play.action_masks().reshape(play.N, play.K + 2)
     assert all(mask[i, int(action[i])] for i in range(play.N)), "only valid actions were chosen"
     play.step(action)
+
+
+def test_empty_plan_does_not_nan_on_p02():
+    env = OpsEnv(scenario=load(P02_SHIFT), events=EventConfig.off(), seed=0)
+    batch = _obs_batch(env, batch=2)
+    batch["plan"] = torch.zeros_like(batch["plan"])
+    logits, value = OpsAttentionNet(**_SMALL)(batch)
+    assert torch.isfinite(logits).all() and torch.isfinite(value).all()
+
+
+def test_matching_is_conflict_free_and_masked():
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    net = OpsAttentionNet(**_SMALL).eval()
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    masks = np.asarray(obs["mask"], dtype=bool).reshape(-1)
+    with torch.no_grad():
+        actions, _value, _lp = net.act(batch, masks, deterministic=True)
+    picked = actions[0].cpu().numpy()
+    mask = obs["mask"].astype(bool)
+    used = {}
+    downs = 0
+    cap = max(int(round(float(obs["global"][4]) * 48)), 1)
+    for i, a in enumerate(picked[: env.n_sats]):
+        assert mask[i, int(a)]
+        if a < env.K:
+            assert int(a) not in used
+            used[int(a)] = i
+            if obs["jobs"][int(a), 8] > 0.5:
+                downs += 1
+    assert downs <= cap
+
+
+def test_greedy_feature_indices_are_stable():
+    from orbi.greedy import _EDGE_LAST_EXECUTOR, _JOB_DEADLINE, _JOB_DOWNLINK, _JOB_REMAINING, _JOB_VALUE
+
+    assert _JOB_VALUE == 3
+    assert _JOB_REMAINING == 5
+    assert _JOB_DEADLINE == 7
+    assert _JOB_DOWNLINK == 8
+    assert _EDGE_LAST_EXECUTOR == 4
+
+
+def test_greedy_ignores_window_edge_columns():
+    from orbi.greedy import greedy_action
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    base = greedy_action(obs, downlink_limit=env.downlink_limit)
+    noisy = {key: np.array(value, copy=True) for key, value in obs.items()}
+    noisy["edges"][..., 5:] = np.random.default_rng(0).random(noisy["edges"][..., 5:].shape)
+    assert np.array_equal(base, greedy_action(noisy, downlink_limit=env.downlink_limit))
+
+
+def test_pair_scores_read_window_columns():
+    from example.models import _Pointer
+
+    pointer = _Pointer(d=8, edge_dim=8, d_pointer=4)
+    h_s = torch.randn(1, 4, 8)
+    h_j = torch.randn(1, 3, 8)
+    short = torch.zeros(1, 4, 3, 8)
+    long = torch.zeros(1, 4, 3, 8)
+    short[..., 5] = 0.1
+    long[..., 5] = 0.9
+    with torch.no_grad():
+        a = pointer.pair_scores(h_s, h_j, short)
+        b = pointer.pair_scores(h_s, h_j, long)
+    assert not torch.allclose(a, b)
+
+
+def test_stochastic_matching_does_not_skip_legal_slots():
+    from example.models import _match
+
+    class SkipPointer:
+        def pair_scores(self, h_s, h_j, edges):
+            return torch.zeros(h_s.shape[0], h_s.shape[1], h_j.shape[1], device=h_s.device)
+
+        def side_scores(self, h_s, h_j):
+            b, n, _ = h_s.shape
+            k = h_j.shape[1]
+            z = h_s.new_zeros
+            return z((b, n)) - 8, z((b, n)) - 8, z((b, k)) + 8
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    mask = np.asarray(obs["mask"], dtype=bool)
+    legal_slots = np.flatnonzero(mask[: env.n_sats, : env.K].any(axis=0))
+    if legal_slots.size == 0:
+        return
+    h_s = torch.zeros(1, env.N, 8)
+    h_j = torch.zeros(1, env.K, 8)
+    torch.manual_seed(0)
+    with torch.no_grad():
+        picked, _, _, _ = _match(SkipPointer(), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, False)
+    assigned = set(int(x) for x in picked[0, : env.n_sats].tolist() if int(x) < env.K)
+    assert legal_slots[0] in assigned or any(slot in assigned for slot in legal_slots)
+
+
+def test_evaluate_can_score_a_stored_skip():
+    from example.models import _match
+
+    class SkipPointer:
+        def pair_scores(self, h_s, h_j, edges):
+            return torch.zeros(h_s.shape[0], h_s.shape[1], h_j.shape[1], device=h_s.device)
+
+        def side_scores(self, h_s, h_j):
+            b, n, _ = h_s.shape
+            k = h_j.shape[1]
+            z = h_s.new_zeros
+            return z((b, n)), z((b, n)), z((b, k))
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    mask = np.asarray(obs["mask"], dtype=bool)
+    idle = np.full((1, env.N), env.idle_index, dtype=np.int64)
+    h_s = torch.zeros(1, env.N, 8)
+    h_j = torch.zeros(1, env.K, 8)
+    with torch.no_grad():
+        _, logp, _, _ = _match(
+            SkipPointer(), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, False, torch.from_numpy(idle)
+        )
+    assert torch.isfinite(logp).all()
+
+
+def test_kl_budget_is_per_satellite():
+    from gymnasium.spaces import MultiDiscrete
+
+    from example.train import _action_rows
+
+    class _Dummy:
+        action_space = MultiDiscrete([50] * 48)
+
+    assert _action_rows(_Dummy()) == 48
+
+
+def test_deterministic_matching_assigns_legal_jobs():
+    from example.models import _match
+
+    class SkipPointer:
+        def pair_scores(self, h_s, h_j, edges):
+            return torch.zeros(h_s.shape[0], h_s.shape[1], h_j.shape[1], device=h_s.device)
+
+        def side_scores(self, h_s, h_j):
+            b, n, _ = h_s.shape
+            k = h_j.shape[1]
+            z = h_s.new_zeros
+            return z((b, n)) + 8, z((b, n)) + 8, z((b, k)) + 8
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    mask = np.asarray(obs["mask"], dtype=bool)
+    h_s = torch.zeros(1, env.N, 8)
+    h_j = torch.zeros(1, env.K, 8)
+    with torch.no_grad():
+        picked, _, _, _ = _match(SkipPointer(), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, True)
+    jobs = int((picked[0, : env.n_sats] < env.K).sum())
+    legal = int(mask[: env.n_sats, : env.K].any())
+    assert jobs > 0 or not legal
+
+
+def test_matching_short_window_can_beat_worth():
+    from example.models import _match
+
+    class WindowPointer:
+        def pair_scores(self, h_s, h_j, edges):
+            return -10.0 * edges[..., 5]
+
+        def side_scores(self, h_s, h_j):
+            b, n, _ = h_s.shape
+            k = h_j.shape[1]
+            z = h_s.new_zeros
+            return z((b, n)), z((b, n)) - 8, z((b, k)) - 8
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    batch = {key: torch.from_numpy(np.array(value, copy=True)[None]).float() for key, value in obs.items()}
+    batch["jobs"][:] = 0
+    batch["jobs"][0, 0, 0] = 1.0
+    batch["jobs"][0, 1, 0] = 1.0
+    batch["jobs"][0, 0, 3] = 4.0
+    batch["jobs"][0, 1, 3] = 0.2
+    batch["jobs"][0, :, 5] = 0.2
+    batch["edges"][:] = 0
+    batch["edges"][0, 0, 0, 0] = 1.0
+    batch["edges"][0, 0, 1, 0] = 1.0
+    batch["edges"][0, 0, 0, 5] = 0.9
+    batch["edges"][0, 0, 1, 5] = 0.1
+    mask = np.zeros((env.N, env.K + 2), dtype=bool)
+    mask[:, env.idle_index] = True
+    mask[0, 0] = True
+    mask[0, 1] = True
+    h_s = torch.zeros(1, env.N, 8)
+    h_j = torch.zeros(1, env.K, 8)
+    with torch.no_grad():
+        picked, _, _, _ = _match(WindowPointer(), h_s, h_j, batch["edges"], batch["jobs"], mask, batch, True)
+    assert int(picked[0, 0]) == 1
+
+
+def test_assignment_loss_falls_on_greedy_pairs():
+    from example.train import _assignment_loss
+    from orbi.greedy import greedy_action
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    act = greedy_action(obs, downlink_limit=env.downlink_limit)
+    net = OpsAttentionNet(**_SMALL)
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    act_t = torch.from_numpy(act[None])
+    mask = np.asarray(obs["mask"], dtype=bool).reshape(-1)
+    loss = _assignment_loss(net, batch, act_t, mask)
+    assert torch.isfinite(loss)
+    assert float(loss.detach()) > 0.0
+
+
+def test_matching_disagrees_with_greedy_on_window_obs():
+    from orbi.greedy import greedy_action
+
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+    obs, _ = env.reset(seed=0)
+    greedy = greedy_action(obs, downlink_limit=env.downlink_limit)
+    net = OpsAttentionNet(**_SMALL).eval()
+    batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
+    masks = np.asarray(obs["mask"], dtype=bool).reshape(-1)
+    with torch.no_grad():
+        actions, _, _ = net.act(batch, masks, deterministic=True)
+    picked = actions[0].cpu().numpy()[: env.n_sats]
+    assert not np.array_equal(picked, greedy[: env.n_sats])
+
+
+def test_pointer_has_no_worth_logit_bias():
+    import example.models as models
+    from example.models import _Pointer
+
+    assert not hasattr(models, "_WORTH_GAIN")
+    pointer = _Pointer(d=8, edge_dim=8, d_pointer=4)
+    h_s = torch.zeros(2, 4, 8)
+    h_j = torch.zeros(2, 3, 8)
+    edges = torch.zeros(2, 4, 3, 8)
+    with torch.no_grad():
+        a = pointer.pair_scores(h_s, h_j, edges)
+        b = pointer.pair_scores(h_s, h_j, edges)
+    assert torch.allclose(a, b)
 
 
 def test_ctde_policy_forward_and_transfer():

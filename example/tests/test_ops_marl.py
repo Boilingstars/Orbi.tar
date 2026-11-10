@@ -113,6 +113,20 @@ def test_neighbor_methods_and_padding():
     assert obs["neighbors"][0, :, 0].sum() == 5
 
 
+def test_ground_control_visible_outranks_worth():
+    env = _env()
+    env.reset(seed=0)
+    control = GroundControl(top_k=env.K)
+    known = env.observation.known_jobs(env)
+    env._job_views = {}
+    visible = [job for job in known if control.has_contact(env, job)]
+    hidden = [job for job in known if not control.has_contact(env, job)]
+    if visible and hidden:
+        cheap = min(visible, key=lambda job: job.get("value_usd", 0.0))
+        rich = max(hidden, key=lambda job: job.get("value_usd", 0.0))
+        assert control.job_rank(env, cheap) < control.job_rank(env, rich)
+
+
 def test_ground_control_top_k_and_cluster():
     env = _env()
     env.reset(seed=0)

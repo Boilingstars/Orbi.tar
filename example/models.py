@@ -1,8 +1,9 @@
-"""Sequential dispatcher and the same decoder under CTDE.
+"""Learned pair scores plus job-first greedy matching.
 
-One encoder reads the fleet and the job slots. Satellites then pick a slot,
-idle, or calibrate in index order. A taken slot leaves the mask, and a third
-downlink is closed. The log-probability is the sum of those conditional choices.
+One encoder reads the fleet and the job slots. A pointer scores every satellite-slot
+pair. Matching walks jobs by those scores, assigns at most one free satellite, and
+respects the downlink cap. Idle and calibrate are leftover heads. The joint
+log-probability is the sum of those conditional choices.
 CTDE keeps this decoder and swaps the encoder for a local one; the critic
 still reads the whole fleet.
 """
@@ -16,7 +17,7 @@ from sb3_contrib.common.maskable.distributions import MaskableCategorical
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
-from orbi.env import EDGE_FEATURES, GLOBAL_FEATURES, JOB_FEATURES, NEIGHBOR_FEATURES, SAT_FEATURES
+from orbi.env import EDGE_FEATURES, GLOBAL_DOWNLINK_CAP, GLOBAL_FEATURES, JOB_FEATURES, N_MAX, NEIGHBOR_FEATURES, SAT_FEATURES
 
 
 # Negative infinity for masked logits.
@@ -28,8 +29,9 @@ _PRESENCE = 11
 # Index of the downlink feature.
 _DOWNLINK = 8
 
-# Maximum number of downlinks per satellite.
-_DOWNLINK_CAP = 2
+# Idle and calibrate start this far below a zero slot score, so a fresh policy
+# still samples jobs. Skip is the option to leave a slot unassigned.
+_ASIDE = -2.0
 
 
 class OpsAttentionNet(nn.Module):
@@ -61,7 +63,9 @@ class OpsAttentionNet(nn.Module):
 
     def _run(self, obs, masks=None, deterministic=False, actions=None):
         h_s, h_j, edges, jobs, value = self.encoder(obs)
-        picked, log_prob, entropy, logits = _sequence(self.pointer, h_s, h_j, edges, jobs, masks, deterministic, actions)
+        picked, log_prob, entropy, logits = _match(
+            self.pointer, h_s, h_j, edges, jobs, masks, obs, deterministic, actions
+        )
         return picked, log_prob, entropy, logits, value
 
     def forward(self, obs):
@@ -89,7 +93,7 @@ class LocalActor(nn.Module):
 
     def _run(self, obs, masks=None, deterministic=False, actions=None):
         h_s, h_j, edges, jobs, _ = self.encoder(obs)
-        return _sequence(self.pointer, h_s, h_j, edges, jobs, masks, deterministic, actions)
+        return _match(self.pointer, h_s, h_j, edges, jobs, masks, obs, deterministic, actions)
 
     def forward(self, obs):
         return self._run(obs, deterministic=True)[3].flatten(1)
@@ -260,6 +264,14 @@ def _pool(h, valid, scorer):
     return (h * weights).sum(dim=1) * any_valid.float()
 
 
+def _pool_plan(emb_job, pool_job, plan: torch.Tensor) -> torch.Tensor:
+    """Embed only filled plan rows. The env pads the table to PLAN_MAX."""
+    valid = plan[..., 0:3].sum(-1) > 0
+    filled = valid.any(0)
+    last = int(filled.nonzero()[-1].item()) + 1 if filled.any() else 1
+    return _pool(emb_job(plan[:, :last]), valid[:, :last], pool_job)
+
+
 class _Encoder(nn.Module):
     """Fleet/job encoder. `local` drops fleet self-attention and reads neighbors instead."""
 
@@ -298,11 +310,10 @@ class _Encoder(nn.Module):
         job_valid = jobs[..., 0:3].sum(-1) > 0
         eligible = edges[..., 0] > 0
 
-        # Embed satellites and slots, and fold the whole plan into the global vector.
+        # Embed satellites and slots, and fold unfinished work into the global vector.
         h_g = self.emb_global(glob)
         if not self.local and "plan" in obs:
-            plan = obs["plan"].float()
-            h_g = h_g + _pool(self.emb_job(plan), plan[..., 0:3].sum(-1) > 0, self.pool_plan)
+            h_g = h_g + _pool_plan(self.emb_job, self.pool_plan, obs["plan"].float())
         h_s = self.emb_sat(sats) + h_g.unsqueeze(1)
         h_j = self.emb_job(jobs) + h_g.unsqueeze(1)
 
@@ -350,11 +361,20 @@ class _Pointer(nn.Module):
         self.v = nn.Linear(d_pointer, 1, bias=False)
         self.idle = nn.Linear(d, 1)
         self.calibrate = nn.Linear(d, 1)
+        self.skip = nn.Linear(d, 1)
 
-    def logits(self, h_s_i, h_j, edge_i):
-        pair = self.q(h_s_i).unsqueeze(1) + self.k(h_j) + self.e(edge_i)
-        scores = self.v(torch.tanh(pair)).squeeze(-1)
-        return torch.cat([scores, self.idle(h_s_i), self.calibrate(h_s_i)], -1)
+        nn.init.constant_(self.idle.bias, _ASIDE)
+        nn.init.constant_(self.calibrate.bias, _ASIDE)
+        nn.init.constant_(self.skip.bias, _ASIDE)
+
+    def pair_scores(self, h_s, h_j, edges):
+        query = self.q(h_s).unsqueeze(2)
+        key = self.k(h_j).unsqueeze(1)
+        edge = self.e(edges)
+        return self.v(torch.tanh(query + key + edge)).squeeze(-1)
+
+    def side_scores(self, h_s, h_j):
+        return self.idle(h_s).squeeze(-1), self.calibrate(h_s).squeeze(-1), self.skip(h_j).squeeze(-1)
 
 
 def _mask_tensor(masks, n, k, device):
@@ -363,55 +383,126 @@ def _mask_tensor(masks, n, k, device):
     return torch.as_tensor(masks, device=device, dtype=torch.bool).reshape(-1, n, k + 2)
 
 
-def _sequence(pointer, h_s, h_j, edges, jobs, masks, deterministic=False, actions=None):
-    """Pick in index order. Each step sees slots already taken and the downlink cap."""
+def _downlink_caps(obs, batch: int, device) -> torch.Tensor:
+    """Fleet downlink cap, recovered from global[GLOBAL_DOWNLINK_CAP] = limit / N_MAX."""
+    glob = None if not isinstance(obs, dict) else obs.get("global")
+    if glob is None:
+        return torch.full((batch,), 2, device=device, dtype=torch.long)
+    raw = torch.as_tensor(glob, device=device, dtype=torch.float32)
+    if raw.ndim == 1:
+        raw = raw.unsqueeze(0)
+    caps = (raw[:, GLOBAL_DOWNLINK_CAP] * N_MAX).round().clamp(min=1).to(dtype=torch.long)
+    if caps.shape[0] == 1 and batch > 1:
+        caps = caps.expand(batch)
+    return caps
+
+
+def _match(pointer, h_s, h_j, edges, jobs, masks, obs, deterministic=False, actions=None):
+    """Score every pair, then assign jobs in score order. Skip leaves a slot empty."""
     b, n, _ = h_s.shape
     k = h_j.shape[1]
     device = h_s.device
     base = _mask_tensor(masks, n, k, device)
-
-    # Slots already taken, and how many downlinks earlier satellites opened.
+    caps = _downlink_caps(obs, b, device)
     job_valid = jobs[..., 0:3].sum(-1) > 0
     is_down = jobs[..., _DOWNLINK] > 0.5
-    taken = torch.zeros(b, k, dtype=torch.bool, device=device)
+    sats = torch.as_tensor(obs["sats"], device=device, dtype=torch.float32)
+    if sats.ndim == 2:
+        sats = sats.unsqueeze(0)
+    sat_valid = sats[..., _PRESENCE] > 0
+
+    pair = pointer.pair_scores(h_s, h_j, edges)
+    idle, cal, skip = pointer.side_scores(h_s, h_j)
+    table = torch.cat([pair, idle.unsqueeze(-1), cal.unsqueeze(-1)], dim=-1)
+
+    legal_pair = pair.clone()
+    if base is not None:
+        legal_pair = legal_pair.masked_fill(~base[..., :k], _NEG)
+    legal_pair = legal_pair.masked_fill(~sat_valid.unsqueeze(-1), _NEG)
+    # Learned pair scores pick the job. A light priority nudge, then the pointer.
+    prio = jobs[..., 0:3] @ torch.tensor([1.0, 2.0, 3.0], device=device, dtype=pair.dtype)
+    job_priority = legal_pair.max(dim=1).values + 0.5 * prio
+    job_priority = job_priority.masked_fill(~job_valid, _NEG)
+    order = job_priority.argsort(dim=-1, descending=True)
+
+    free = sat_valid.clone()
     downs = torch.zeros(b, dtype=torch.long, device=device)
-    chosen, lps, ents, rows = [], [], [], []
+    chosen = torch.full((b, n), k, dtype=torch.long, device=device)
+    lps = []
+    ents = []
+    rows = torch.full((b, n, k + 2), _NEG, device=device, dtype=table.dtype)
+    rows[:, :, k] = idle
+    rows[:, :, k + 1] = cal
+    rows[:, :, :k] = pair
+    batch_idx = torch.arange(b, device=device)
 
-    for i in range(n):
-        # This satellite's legal set: the env mask, minus taken slots and a full downlink cap.
-        logits = pointer.logits(h_s[:, i], h_j, edges[:, i])
-
+    for step in range(k):
+        slot = order[:, step]
+        slot_exp = slot.view(b, 1, 1).expand(b, n, 1)
+        slot_scores = pair.gather(2, slot_exp).squeeze(-1)
+        last_exec = edges[..., 4].gather(2, slot_exp).squeeze(-1)
+        slot_scores = slot_scores + 1.0 * sats[..., 0] + last_exec
+        slot_skip = skip.gather(1, slot.unsqueeze(1)).squeeze(1)
+        slot_down = is_down.gather(1, slot.unsqueeze(1)).squeeze(1)
+        slot_ok = job_valid.gather(1, slot.unsqueeze(1)).squeeze(1)
         if base is None:
-            legal = torch.ones(b, k + 2, dtype=torch.bool, device=device)
+            sat_ok = sat_valid.clone()
         else:
-            legal = base[:, i].clone()
-
-        legal[:, :k] &= job_valid & ~taken
-        room = (downs < _DOWNLINK_CAP).unsqueeze(1)
-        legal[:, :k] &= ~is_down | room
-        legal[torch.arange(b, device=device)[~legal.any(-1)], k] = True
-        dist = MaskableCategorical(logits=logits, masks=legal)
+            sat_ok = base[..., :k].gather(2, slot_exp).squeeze(-1)
+        sat_ok = sat_ok & free & slot_ok.unsqueeze(1)
+        sat_ok = sat_ok & (~slot_down.unsqueeze(1) | (downs < caps).unsqueeze(1))
+        logits = torch.cat([slot_scores, slot_skip.unsqueeze(1)], dim=-1)
+        # Sample/eval never skip a legal satellite. Replay must still score a stored skip.
+        can_skip = ~sat_ok.any(dim=-1, keepdim=True)
+        if actions is not None:
+            can_skip = torch.ones_like(can_skip)
+        allow, _ = _open(torch.cat([sat_ok, can_skip], dim=-1))
+        dist = MaskableCategorical(logits=logits, masks=allow)
 
         if actions is not None:
-            pick = actions[:, i].long()
+            took = actions.long() == slot.unsqueeze(1)
+            has = took.any(dim=-1)
+            pick = torch.where(has, took.to(torch.long).argmax(dim=-1), torch.full((b,), n, device=device, dtype=torch.long))
         elif deterministic:
-            pick = logits.masked_fill(~legal, _NEG).argmax(-1)
+            # Inference assigns the best legal satellite. Skip only when the slot is empty.
+            best = slot_scores.masked_fill(~sat_ok, _NEG).argmax(-1)
+            pick = torch.where(sat_ok.any(dim=-1), best, torch.full((b,), n, device=device, dtype=torch.long))
         else:
             pick = dist.sample()
 
-        chosen.append(pick)
         lps.append(dist.log_prob(pick))
         ents.append(dist.entropy())
-        rows.append(logits.masked_fill(~legal, _NEG))
+        assigned = pick < n
+        if assigned.any():
+            chosen[batch_idx[assigned], pick[assigned]] = slot[assigned]
+            free = free.clone()
+            free[batch_idx[assigned], pick[assigned]] = False
+            downs = downs + (assigned & slot_down).long()
 
-        # A job slot closes. Idle and calibrate leave it for the next satellite.
-        job_pick = pick < k
-        took = torch.zeros(b, k, dtype=torch.bool, device=device)
-        took[torch.arange(b, device=device), torch.where(job_pick, pick, torch.zeros_like(pick))] = job_pick
+    for i in range(n):
+        leftover = free[:, i]
+        logits_ic = torch.stack([idle[:, i], cal[:, i]], dim=-1)
+        allow_ic = torch.ones(b, 2, dtype=torch.bool, device=device)
+        if base is not None:
+            allow_ic[:, 0] = base[:, i, k]
+            allow_ic[:, 1] = base[:, i, k + 1]
+        allow_ic, _ = _open(allow_ic)
+        dist = MaskableCategorical(logits=logits_ic, masks=allow_ic)
+        if actions is not None:
+            pick = (actions[:, i].long() == (k + 1)).long()
+        elif deterministic:
+            pick = logits_ic.masked_fill(~allow_ic, _NEG).argmax(-1)
+        else:
+            pick = dist.sample()
+        lp = dist.log_prob(pick)
+        ent = dist.entropy()
+        lps.append(torch.where(leftover, lp, torch.zeros_like(lp)))
+        ents.append(torch.where(leftover, ent, torch.zeros_like(ent)))
+        chosen[:, i] = torch.where(leftover & (pick == 1), torch.full_like(chosen[:, i], k + 1), chosen[:, i])
 
-        taken = taken | took
-        downs = downs + (took & is_down).sum(-1)
-    return torch.stack(chosen, 1), torch.stack(lps, 1).sum(1), torch.stack(ents, 1).sum(1), torch.stack(rows, 1)
+    if base is not None:
+        rows = rows.masked_fill(~base, _NEG)
+    return chosen, torch.stack(lps, 0).sum(0), torch.stack(ents, 0).sum(0), rows
 
 
 __all__ = ["CtdeNet", "LocalActor", "OpsAttentionNet", "OpsAttentionPolicy", "count_parameters"]

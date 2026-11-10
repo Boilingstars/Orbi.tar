@@ -5,8 +5,11 @@
 
 from __future__ import annotations
 
+import os
+import time
 from collections.abc import Generator
 
+import gymnasium as gym
 import numpy as np
 import torch
 import torch.nn as nn
@@ -14,17 +17,19 @@ import torch.nn.functional as F
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
 from sb3_contrib.common.wrappers import ActionMasker
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import explained_variance, obs_as_tensor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 import example.jobs
 from example.agent import Ctde, Dispatcher, GreedyAgent
-from example.models import OpsAttentionPolicy, count_parameters
+from example.models import OpsAttentionPolicy, count_parameters, _NEG
 from example.plots import plot_run
 from orbi import load, resolve_scenario
 from orbi.env import N_MAX, EventConfig, OpsEnv
-from tools.evaluating import load_ppo
+from orbi.greedy import greedy_action
+from tools.evaluating import load_ppo, run_episode
 from tools.training import Session, Trainer, launch
 
 
@@ -37,14 +42,32 @@ PROFILES = {
 
 TRAINING = (
     (Dispatcher, "maskable_ppo"),
-    # (Dispatcher, "maskable_ppo_greedy"),
-    (Ctde, "mappo"),
+    # (Ctde, "mappo"),
 )
 
 # Greedy imitation length, then the entropy bonus slides from START to END.
 GREEDY_EPISODES = 4
 ENTROPY_START = 0.03
-ENTROPY_END = 0.001
+ENTROPY_END = 0.008
+
+# PPO sees dollars / this. Monitor still records the raw episode return.
+_REWARD_SCALE = 100.0
+
+# Eight env workers, as in the original launch. Trainer threads apply after spawn.
+_N_ENVS = 8
+_ROLLOUT_STEPS = 128
+_TRAINER_THREADS = 4
+
+
+class _ScaleReward(gym.RewardWrapper):
+    """Keep the logged return in dollars; shrink the critic target."""
+
+    def __init__(self, env: gym.Env, scale: float = _REWARD_SCALE) -> None:
+        super().__init__(env)
+        self._scale = float(scale)
+
+    def reward(self, reward):
+        return float(reward) / self._scale
 
 
 # Fields copied from PPOTrainer into MaskablePPO. `n_steps` is the episode length.
@@ -68,13 +91,14 @@ class PPOTrainer(Trainer):
     suite = "example"
     policy_name = "dispatcher"
 
-    learning_rate = 1e-4
-    value_learning_rate = 1e-4
-    ent_coef = 0.03
-    target_kl = 1.5
+    # 1e-4 chased the old cal penalty and clipped half the batch. Stay smaller.
+    learning_rate = 3e-5
+    value_learning_rate = 3e-4
+    ent_coef = 0.008
+    target_kl = 0.1
     batch_size = 128
     n_epochs = 4
-    gamma = 0.995
+    gamma = 0.998
     gae_lambda = 0.95
     clip_range = 0.2
     vf_coef = 0.5
@@ -234,13 +258,36 @@ class Mappo(MaskablePPO):
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
 
 
-class _AnnealedPPO(MaskablePPO):
+def _action_rows(model) -> int:
+    """Satellites in the MultiDiscrete joint action, used to turn joint KL into per-sat."""
+    nvec = getattr(model.action_space, "nvec", None)
+    if nvec is None:
+        return 1
+    return max(int(np.asarray(nvec).shape[0]), 1)
+
+
+class _PerSatPPO(MaskablePPO):
+    """MaskablePPO with `target_kl` as a per-satellite budget, not the joint sum."""
+
+    def train(self) -> None:
+        n = _action_rows(self)
+        per_sat = self.target_kl
+        if per_sat is not None:
+            self.target_kl = per_sat * n
+        super().train()
+        self.target_kl = per_sat
+        joint = self.logger.name_to_value.get("train/approx_kl")
+        if joint is not None:
+            self.logger.record("train/approx_kl_joint", float(joint))
+            self.logger.record("train/approx_kl", float(joint) / n)
+
+
+class _AnnealedPPO(_PerSatPPO):
     """Same update as MaskablePPO. The entropy bonus falls across the run."""
     def train(self) -> None:
         # 0 at the first rollout, 1 when the step budget is spent.
         done = 1.0 - float(self._current_progress_remaining)
         self.ent_coef = ENTROPY_START + (ENTROPY_END - ENTROPY_START) * done
-
         super().train()
         self.logger.record("train/ent_coef", self.ent_coef)
 
@@ -248,7 +295,9 @@ class _AnnealedPPO(MaskablePPO):
 def maskable_ppo(session: Session, agent) -> MaskablePPO:
     """RL from the first step. One team advantage for the joint action."""
     _only(agent, "dispatcher", "maskable_ppo")
-    return _build(session, agent, MaskablePPO)
+    model = _build(session, agent, _PerSatPPO)
+    session.notes.update(method="maskable_ppo", kl_budget="per_sat")
+    return model
 
 
 def maskable_ppo_greedy(session: Session, agent) -> MaskablePPO:
@@ -322,9 +371,10 @@ def _make_env(run, spec: dict, events: EventConfig, seed: int):
             neighbor_method=run.neighbor_method,
             neighbor_memory=run.neighbor_memory,
             ground_points=run.ground_points,
-            far_job_p=run.far_job_p,
+            ground_region=run.ground_region,
+            job_difficulty=run.job_difficulty,
         )
-        return ActionMasker(Monitor(env), mask_fn)
+        return ActionMasker(_ScaleReward(Monitor(env)), mask_fn)
 
     return _thunk
 
@@ -379,21 +429,31 @@ def _split_value_learning_rate(model: MaskablePPO, policy_lr: float, value_lr: f
     model._excluded_save_params = _excluded_save_params
 
 
+def _widen_trainer_threads(n: int) -> None:
+    """Workers keep OMP=1 from the launch env. The parent uses leftover cores for PPO."""
+    n = max(int(n), 1)
+    for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[key] = str(n)
+    torch.set_num_threads(n)
+
+
 def _build(session: Session, agent, algo) -> MaskablePPO:
     """One vec-env and one policy. The reward is `MyReward`."""
     run = session.run
     trainer = session.trainer
     path = resolve_scenario(run.scenario)
     spec = load(path)
+    run.n_envs = _N_ENVS
 
     # One wrapped environment per worker. Events follow `Run`.
     events = EventConfig() if run.events else EventConfig.off()
     thunks = [_make_env(run, spec, events, run.seed + i) for i in range(run.n_envs)]
     vec = SubprocVecEnv if run.subproc and run.n_envs > 1 else DummyVecEnv
     env = vec(thunks)
+    _widen_trainer_threads(_TRAINER_THREADS)
 
-    # Same hyperparameters as PPOTrainer. A rollout is one episode.
-    n_steps = run.max_steps or spec["time"]["steps"]
+    # Shorter than the 288-tick shift so PPO updates more often.
+    n_steps = _ROLLOUT_STEPS
     policy_kwargs = dict(PROFILES[run.profile], controller=agent.controller)
     model = algo(
         OpsAttentionPolicy,
@@ -428,60 +488,164 @@ def _build(session: Session, agent, algo) -> MaskablePPO:
         agent=agent.__name__,
     )
     model._horizon = n_steps
+    session.callbacks = [_RolloutPing(), _GreedyAnchor(run)]
     return model
+
+
+class _RolloutPing(BaseCallback):
+    """Stdout heartbeat so a slow jammed env is not a blank train.log."""
+
+    def __init__(self, every_calls: int = 32) -> None:
+        super().__init__()
+        self._every = int(every_calls)
+
+    def _on_step(self) -> bool:
+        if self.n_calls == 1 or self.n_calls % self._every == 0:
+            print(f"rollout timestep={self.num_timesteps} calls={self.n_calls}", flush=True)
+        return True
+
+
+class _GreedyAnchor(BaseCallback):
+    """Greedy revenue / P3 on seed 0, logged next to the learner's ops/*."""
+
+    def __init__(self, run, every_steps: int = 20_480) -> None:
+        super().__init__()
+        self._run = run
+        self._every = int(every_steps)
+        self._next = 0
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps < self._next:
+            return True
+        self._next = self.num_timesteps + self._every
+        spec = load(resolve_scenario(self._run.scenario))
+        events = EventConfig() if self._run.events else EventConfig.off()
+        env = OpsEnv(
+            scenario=spec,
+            events=events,
+            seed=0,
+            ground_points=self._run.ground_points,
+            ground_region=self._run.ground_region,
+            job_difficulty=self._run.job_difficulty,
+        )
+        row = run_episode(env, lambda obs: greedy_action(obs, downlink_limit=env.downlink_limit), seed=0)
+        summary = row.get("summary") or {}
+        due = max(float(summary.get("critical_jobs_due", 0.0)), 1.0)
+        total = max(float(summary.get("jobs_total", 0.0)), 1.0)
+        self.logger.record("ops/greedy_revenue_usd", float(summary.get("revenue_usd", 0.0)))
+        self.logger.record(
+            "ops/greedy_critical_on_time_share",
+            float(summary.get("critical_jobs_completed_on_time", 0.0)) / due,
+        )
+        self.logger.record("ops/greedy_completed_share", float(summary.get("jobs_completed", 0.0)) / total)
+        self.logger.record("ops/greedy_min_soc_pct", float(summary.get("minimum_soc_pct", 0.0)))
+        print(
+            f"greedy anchor revenue={summary.get('revenue_usd')} "
+            f"p3={summary.get('critical_jobs_completed_on_time')}/{summary.get('critical_jobs_due')} "
+            f"completed={summary.get('jobs_completed')}/{summary.get('jobs_total')} "
+            f"min_soc={summary.get('minimum_soc_pct')}",
+            flush=True,
+        )
+        return True
 
 
 def _stack_obs(frames: list[dict]) -> dict:
     return {key: np.concatenate([frame[key] for frame in frames], axis=0) for key in frames[0]}
 
 
-def _imitate_greedy(model: MaskablePPO, episodes: int) -> None:
-    """Cross-entropy on greedy's own trajectory.
+def _assignment_loss(net, obs, actions, masks) -> torch.Tensor:
+    """Cross-entropy of greedy's pairs and leftover idle/cal, not of skip."""
+    encoder = net.encoder if hasattr(net, "encoder") else net.actor.encoder
+    pointer = net.pointer if hasattr(net, "pointer") else net.actor.pointer
+    h_s, h_j, edges, _jobs, _value = encoder(obs)
+    pair = pointer.pair_scores(h_s, h_j, edges)
+    idle, cal, _skip = pointer.side_scores(h_s, h_j)
+    act = actions.long()
+    batch, n = act.shape
+    k = h_j.shape[1]
+    device = pair.device
+    legal = torch.as_tensor(masks, device=device, dtype=torch.bool).reshape(batch, n, k + 2)
+    sats = torch.as_tensor(obs["sats"], device=device, dtype=torch.float32)
+    if sats.ndim == 2:
+        sats = sats.unsqueeze(0)
+    alive = sats[..., 11] > 0
+    terms = []
 
-    The decoder is sequential, so the teacher's action already keeps a slot
-    from being given to the next satellite.
-    """
+    # Each filled slot: the satellite greedy picked should win among legal rows.
+    for slot in range(k):
+        holders = (act == slot) & alive
+        if not holders.any():
+            continue
+        logits = pair[:, :, slot].masked_fill(~legal[:, :, slot], _NEG)
+        logp = torch.log_softmax(logits, dim=1)
+        terms.append(-(logp * holders.float()).sum(dim=1) / holders.float().sum(dim=1).clamp(min=1.0))
+
+    leftover = alive & (act >= k)
+    side = torch.stack([idle, cal], dim=-1)
+    side_ok = torch.stack([legal[:, :, k], legal[:, :, k + 1]], dim=-1)
+    side = side.masked_fill(~side_ok, _NEG)
+    pick = (act == (k + 1)).long()
+    logp_side = torch.log_softmax(side, dim=-1)
+    side_nll = -logp_side.gather(-1, pick.unsqueeze(-1)).squeeze(-1)
+    terms.append(torch.where(leftover, side_nll, torch.zeros_like(side_nll)).sum(dim=1) / leftover.float().sum(dim=1).clamp(min=1.0))
+    return torch.stack(terms, 0).mean()
+
+
+def _imitate_greedy(model: MaskablePPO, episodes: int) -> None:
+    """Fit pair scores to a stored greedy buffer so early ticks are not forgotten."""
     env = model.env
     teachers = [GreedyAgent(limit) for limit in env.get_attr("downlink_limit")]
     parameters = [p for p in model.policy.parameters() if p.requires_grad]
-    opt = torch.optim.Adam(parameters, lr=model.learning_rate)
+    opt = torch.optim.Adam(parameters, lr=max(float(model.learning_rate) * 10.0, 3e-4))
 
-    # One episode per env, repeated `episodes` times. Update every PPO batch.
     horizon = int(getattr(model, "_horizon", 1))
     steps = max(episodes, 1) * horizon
-    hold = max(model.batch_size // max(env.num_envs, 1), 1)
+    print(f"Greedy imitation: collecting {steps} vec-steps from {len(teachers)} envs", flush=True)
+    t0 = time.monotonic()
     obs = env.reset()
-    batch_obs, batch_act = [], []
+    print(f"Greedy imitation: envs reset in {time.monotonic() - t0:.1f}s", flush=True)
+    frames, acts = [], []
     model.policy.set_training_mode(True)
 
-    for seen in range(1, steps + 1):
-        # What greedy would do in each environment on this observation.
+    for seen in range(steps):
         actions = [
             teacher.act({key: np.asarray(value[i]) for key, value in obs.items()})
             for i, teacher in enumerate(teachers)
         ]
-        batch_obs.append(obs)
-        batch_act.append(np.stack(actions))
+        frames.append({key: np.array(value, copy=True) for key, value in obs.items()})
+        acts.append(np.stack(actions))
+        obs, _, _, _ = env.step(np.stack(actions))
+        if seen == 0 or (seen + 1) % 8 == 0 or seen + 1 == steps:
+            dt = time.monotonic() - t0
+            rate = (seen + 1) / max(dt, 1e-6)
+            eta = (steps - seen - 1) / max(rate, 1e-6)
+            print(
+                f"imitation collect {seen + 1}/{steps}  {dt:.0f}s elapsed, {rate:.2f} it/s, eta {eta:.0f}s",
+                flush=True,
+            )
 
-        # Negative log-probability of that action. Lower means a closer copy.
-        if len(batch_obs) == hold or seen == steps:
-            stacked = _stack_obs(batch_obs)
-            act = np.concatenate(batch_act, axis=0)
-            obs_t = obs_as_tensor(stacked, model.device)
-            act_t = torch.as_tensor(act, device=model.device)
-            _, log_prob, _ = model.policy.evaluate_actions(obs_t, act_t, stacked["mask"].reshape(len(act), -1))
-            loss = -log_prob.mean()
+    stacked = _stack_obs(frames)
+    act = np.concatenate(acts, axis=0)
+    n_rows = len(act)
+    batch_size = min(max(int(model.batch_size), 8), n_rows)
+    epochs = 4
+    rng = np.random.default_rng(0)
 
+    for epoch in range(epochs):
+        order = rng.permutation(n_rows)
+        last = 0.0
+        for start in range(0, n_rows, batch_size):
+            idx = order[start : start + batch_size]
+            mini = {key: stacked[key][idx] for key in stacked}
+            obs_t = obs_as_tensor(mini, model.device)
+            act_t = torch.as_tensor(act[idx], device=model.device)
+            loss = _assignment_loss(model.policy.net, obs_t, act_t, mini["mask"].reshape(len(idx), -1))
             opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(parameters, model.max_grad_norm)
             opt.step()
-            if seen == steps or seen % max(horizon, 1) == 0:
-                print(f"imitation {seen}/{steps} cross-entropy {float(loss.detach()):.3f}", flush=True)
-            batch_obs, batch_act = [], []
-
-        # The next state is the one greedy actually enters.
-        obs, _, _, _ = env.step(np.stack(actions))
+            last = float(loss.detach())
+        print(f"imitation epoch {epoch + 1}/{epochs} assignment-ce {last:.3f}", flush=True)
     print("Greedy imitation done", flush=True)
 
 

@@ -61,7 +61,7 @@ def main() -> None:
         top_k=settings.top_k,
         seed=settings.seed,
         ground_points=settings.ground_points,
-        far_job_p=settings.far_job_p,
+        job_difficulty=settings.job_difficulty,
     )
     report = []
 
