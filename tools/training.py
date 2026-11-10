@@ -14,6 +14,7 @@ from pathlib import Path
 from stable_baselines3.common.callbacks import BaseCallback
 
 from tools.telemetry import (
+    REPO_DIR,
     OpsMetricsCallback,
     configure_run_logger,
     dump_config,
@@ -23,28 +24,20 @@ from tools.telemetry import (
 
 
 # Checkpoint rules. Comment out a line to turn that rule off.
-# A checkpoint is written when any enabled rule fires.
 
-# CHECKPOINT_EVERY_S = 20 * 60
+CHECKPOINT_EVERY_S = 20 * 60
+PLOT_EVERY_S = 20 * 60
+
 # CHECKPOINT_EVERY_STEPS = 10_000
 
-# New maximum of this logged column. EVERY_N_MAX = 1 keeps every new maximum.
-CHECKPOINT_MAX_METRIC = "ops/revenue_usd"
-CHECKPOINT_EVERY_N_MAX = 1
+# CHECKPOINT_MAX_METRIC = "rollout/ep_rew_mean"
+# CHECKPOINT_EVERY_N_MAX = 1
 
 
-# Plot rules. Comment out a line to turn that rule off.
+# Stop once the learning curve has flattened.
 
-# PLOT_EVERY_S = 20 * 60
-
-# Redraw charts each time progress.csv gains a row.
-PLOT_ON_LOG = True
-
-
-# Stop once the learning curve has flattened. Large values keep a fixed-length run.
-
-PATIENCE = 1_000_000_000
-MIN_ITERS = 1_000_000_000
+PATIENCE = 8
+MIN_ITERS = 12
 MIN_DELTA = 0.02
 
 _FRAMEWORK = {
@@ -58,7 +51,6 @@ _FRAMEWORK = {
     "checkpoint_every_n_max",
     "checkpoint_max_metric",
     "plot_every_s",
-    "plot_on_log",
 }
 
 
@@ -66,10 +58,10 @@ _FRAMEWORK = {
 class Run:
     """One launch. These fields are the whole command-line set."""
 
-    scenario: str = "p03"
-    timesteps: int = 120_000
-    n_envs: int = 8
-    top_k: int | None = None
+    scenario: str = "p02"
+    timesteps: int = 162_800
+    n_envs: int = 4
+    top_k: int = 32
     seed: int = 0
     profile: str = "full"
     events: bool = True
@@ -78,12 +70,11 @@ class Run:
     neighbor_method: str = "competitors"
     neighbor_memory: int = 12
     ground_points: int = 64
-    ground_region: str | None = "world"
-    job_difficulty: float = 0.15
+    far_job_p: float = 0.3
     max_steps: int | None = None
     tensorboard: bool = False
-    subproc: bool = True
-    load: str | None = "/root/Orbi.tar/experiments/runs/09_11_26_20_36_example_dispatcher/checkpoints/ckpt_88064.zip"
+    subproc: bool = False
+    load: str | None = None
     save: str | None = None
     run_dir: str | None = None
     resume: bool = False
@@ -117,7 +108,6 @@ class Trainer:
     checkpoint_every_n_max = globals().get("CHECKPOINT_EVERY_N_MAX")
     checkpoint_max_metric = globals().get("CHECKPOINT_MAX_METRIC", "rollout/ep_rew_mean")
     plot_every_s = globals().get("PLOT_EVERY_S")
-    plot_on_log = globals().get("PLOT_ON_LOG")
 
 
 class Session:
@@ -132,21 +122,12 @@ class Session:
 def launch(build, trainer: Trainer, plot=None):
     """Train `build(session) -> model` on the fixed `Run`."""
     run = Run()
-    if trainer.policy_name and trainer.policy_name != "policy":
-        name = trainer.policy_name
-        run.controller = name[: -len("_greedy")] if name.endswith("_greedy") else name
-    else:
-        trainer.policy_name = run.controller
-
+    trainer.policy_name = run.controller
     session = Session(run, trainer)
-
-    # Log, checkpoints, plots, and the final zip all live in this directory.
-    run_dir = Path(run.run_dir) if run.run_dir else make_run_dir(trainer.suite, trainer.policy_name)
-    run.run_dir = str(run_dir)
-    run.save = str(run_dir / "model.zip")
     model = build(session)
 
     # A fresh directory, or the steps already written when this launch resumes.
+    run_dir = Path(run.run_dir) if run.run_dir else make_run_dir(trainer.suite, trainer.policy_name)
     started = last_logged_timesteps(run_dir) if run.resume else 0
     if run.resume:
         model.num_timesteps = started
@@ -158,30 +139,25 @@ def launch(build, trainer: Trainer, plot=None):
     dump_config(run_dir, _config(session, started))
 
     # Checkpoints, plots, and the plateau stop ride along as SB3 callbacks.
-    extra = list(getattr(session, "callbacks", None) or [])
     model.learn(
         total_timesteps=remaining,
         callback=[
             OpsMetricsCallback(),
             RunArtifactsCallback(run_dir, trainer, plot),
             PlateauStopCallback(trainer),
-            *extra,
         ],
         progress_bar=True,
         reset_num_timesteps=not run.resume,
     )
 
-    save_path = Path(run.save)
+    save_path = Path(run.save) if run.save else REPO_DIR / "agent" / "models" / "ops.zip"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(str(save_path))
     (run_dir / "model.txt").write_text(str(save_path), encoding="utf-8")
     print(f"Model: {save_path}\nTraining log: {run_dir}")
     if plot is not None:
-        try:
-            for path in plot(run_dir):
-                print(f"Plot: {path}")
-        except Exception as exc:
-            print(f"Plot failed: {exc}", flush=True)
+        for path in plot(run_dir):
+            print(f"Plot: {path}")
     return model
 
 
@@ -228,7 +204,6 @@ class RunArtifactsCallback(BaseCallback):
         self.every_n_max = trainer.checkpoint_every_n_max
         self.max_metric = trainer.checkpoint_max_metric
         self.plot_every_s = trainer.plot_every_s
-        self.plot_on_log = bool(trainer.plot_on_log)
         self._next_checkpoint = 0.0
         self._next_plot = 0.0
         self._steps_mark = 0
@@ -242,20 +217,6 @@ class RunArtifactsCallback(BaseCallback):
 
         if self.plot_every_s:
             self._next_plot = now + self.plot_every_s
-
-        # Charts follow a real log row, not an empty train-only dump.
-        if self.plot_on_log and self.plot is not None:
-            original = self.logger.dump
-            progress = self.run_dir / "progress.csv"
-
-            def _dump(step: int = 0, _write=original) -> None:
-                before = progress.stat().st_size if progress.exists() else 0
-                _write(step)
-                after = progress.stat().st_size if progress.exists() else 0
-                if after > before:
-                    self._write_plots()
-
-            self.logger.dump = _dump
         self._steps_mark = self.num_timesteps
         (self.run_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
 
@@ -305,11 +266,7 @@ class RunArtifactsCallback(BaseCallback):
         progress = self.run_dir / "progress.csv"
         if not progress.exists() or progress.stat().st_size == 0:
             return
-        try:
-            made = self.plot(self.run_dir)
-        except Exception as exc:
-            print(f"Plots failed: {exc}", flush=True)
-            return
+        made = self.plot(self.run_dir)
         print(f"Plots updated: {len(made)} files in {self.run_dir / 'plots'}", flush=True)
 
     def _save_checkpoint(self) -> None:
@@ -351,10 +308,6 @@ def _config(session: Session, started: int) -> dict:
             "every_steps": trainer.checkpoint_every_steps,
             "every_n_max": trainer.checkpoint_every_n_max,
             "max_metric": trainer.checkpoint_max_metric,
-        },
-        plots={
-            "every_s": trainer.plot_every_s,
-            "on_log": bool(trainer.plot_on_log),
         },
     )
     return payload

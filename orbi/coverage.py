@@ -12,11 +12,6 @@ from orbi.constants import MU_EARTH, OMEGA_EARTH, R_EARTH
 
 GROUND_COVER_KM = 100.0
 GROUND_POINTS_PATH = Path(__file__).with_name("ground_points.json")
-REGIONS_DIR = Path(__file__).with_name("regions")
-
-# Continental Europe, Britain through western Russia. Degrees.
-EUROPE_BOX = {"lat": (36.0, 71.0), "lon": (-10.0, 40.0)}
-REGION_BOXES = {"europe": EUROPE_BOX}
 
 
 def rot_z(theta: float) -> np.ndarray:
@@ -162,46 +157,20 @@ def _seconds_until(t0: float, horizon: float, dt: float, still_true, refine: int
     return horizon
 
 
-def _points_in_view(r_sat_fn, points, t: float, min_elev: float, gmst0: float) -> bool:
-    r_ecef = eci_to_ecef(r_sat_fn(t), t, gmst0)
-    return all(elevation(r_ecef, lla_to_ecef(lat, lon, 0.0)) >= min_elev for lat, lon in points)
-
-
 def access_remaining(r_sat_fn, lat: float, lon: float, t0: float, min_elev: float, gmst0: float = 0.0, max_horizon: float = 900.0, dt: float = 10.0) -> float:
     """Seconds the target stays in view after t0.
 
     r_sat_fn(t) -> ECI position. Returns 0 if the target is not in view at t0.
     """
-    remaining, _next = access_windows(r_sat_fn, ((lat, lon),), t0, min_elev, gmst0, max_horizon, dt)
-    return remaining
-
-
-def access_next(r_sat_fn, lat: float, lon: float, t0: float, min_elev: float, gmst0: float = 0.0, max_horizon: float = 900.0, dt: float = 10.0) -> float:
-    """Seconds until the target rises. 0 if it is already in view."""
-    _remaining, nxt = access_windows(r_sat_fn, ((lat, lon),), t0, min_elev, gmst0, max_horizon, dt)
-    return nxt
-
-
-def access_windows(r_sat_fn, points, t0: float, min_elev: float, gmst0: float = 0.0, max_horizon: float = 900.0, dt: float = 10.0) -> tuple[float, float]:
-    """Joint access of every point: seconds remaining in this pass, seconds to the next rise.
-
-    `next` is 0 while the points are in view. Both are 0 / `max_horizon` when no pass starts inside the horizon.
-    """
-    pts = [(float(lat), float(lon)) for lat, lon in points]
-    if not pts:
-        return 0.0, float(max_horizon)
+    tgt = lla_to_ecef(lat, lon, 0.0)
 
     def in_view(t: float) -> bool:
-        return _points_in_view(r_sat_fn, pts, t, min_elev, gmst0)
+        r_ecef = eci_to_ecef(r_sat_fn(t), t, gmst0)
+        return elevation(r_ecef, tgt) >= min_elev
 
-    if in_view(t0):
-        remaining = _seconds_until(t0, max_horizon, dt, in_view, refine=18, last_true=True)
-        return remaining, 0.0
-
-    nxt = _seconds_until(t0, max_horizon, dt, lambda t: not in_view(t), refine=18, last_true=False)
-    if nxt >= max_horizon - 1e-9 and not in_view(t0 + max_horizon):
-        return 0.0, float(max_horizon)
-    return 0.0, nxt
+    if not in_view(t0):
+        return 0.0
+    return _seconds_until(t0, max_horizon, dt, in_view, refine=18, last_true=True)
 
 
 def time_to_sun_change(r_sat_fn, sun_eci: np.ndarray, t0: float, currently_in_sun: bool, max_horizon: float = 6000.0, dt: float = 20.0) -> float:
@@ -229,113 +198,22 @@ def load_ground_points(path: Path | None = None) -> np.ndarray:
     return np.column_stack((np.deg2rad(pts[:, 0]), np.deg2rad(pts[:, 1])))
 
 
-def load_ground_region(name: str) -> np.ndarray:
-    """Region rows in radians. Row 0 is the centre; each next row is the next-nearest neighbour."""
-    path = REGIONS_DIR / f"{name}.json"
-    if not path.exists():
-        raise ValueError(f"Unknown ground region {name!r}")
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    pts = np.asarray(raw["points"], dtype=float)
-    if pts.ndim != 2 or pts.shape[1] < 2 or len(pts) < 2:
-        raise ValueError(f"{path.name} needs at least two lat/lon rows")
-    return np.column_stack((np.deg2rad(pts[:, 0]), np.deg2rad(pts[:, 1])))
-
-
-def write_ground_region(name: str = "europe", box: dict | None = None) -> Path:
-    """Keep catalog points inside `box`, then order them from the centre outward.
-
-    The centre is the catalog point nearest the mean of the box. Every later
-    row is the next nearest neighbour of that centre, so the first `m` rows
-    are the local group.
-    """
-    box = box or REGION_BOXES[name]
-    raw = json.loads(GROUND_POINTS_PATH.read_text(encoding="utf-8"))
-    pts = np.asarray(raw["points"], dtype=float)
-    lat0, lat1 = box["lat"]
-    lon0, lon1 = box["lon"]
-    inside = (
-        (pts[:, 0] >= lat0)
-        & (pts[:, 0] <= lat1)
-        & (pts[:, 1] >= lon0)
-        & (pts[:, 1] <= lon1)
-    )
-    chosen = pts[inside]
-    if len(chosen) < 2:
-        raise ValueError(f"{name} box holds {len(chosen)} catalog points")
-
-    # The forming point is the catalog site closest to the middle of the land box.
-    mean_lat = float(chosen[:, 0].mean())
-    mean_lon = float(chosen[:, 1].mean())
-    to_mean = haversine_m(
-        math.radians(mean_lat),
-        math.radians(mean_lon),
-        np.deg2rad(chosen[:, 0]),
-        np.deg2rad(chosen[:, 1]),
-    )
-    center = chosen[int(np.argmin(to_mean))]
-    to_center = haversine_m(
-        math.radians(float(center[0])),
-        math.radians(float(center[1])),
-        np.deg2rad(chosen[:, 0]),
-        np.deg2rad(chosen[:, 1]),
-    )
-    ordered = chosen[np.argsort(to_center, kind="mergesort")]
-    payload = {
-        "name": name,
-        "order": "nearest_to_center",
-        "box": {"lat": [lat0, lat1], "lon": [lon0, lon1]},
-        "center": [round(float(center[0]), 4), round(float(center[1]), 4)],
-        "points": [[round(float(lat), 4), round(float(lon), 4)] for lat, lon in ordered],
-    }
-    REGIONS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = REGIONS_DIR / f"{name}.json"
-    dest.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
-    return dest
-
-
-def pair_ground_points(
-    rng,
-    points,
-    mean_radius_m: float,
-    difficulty: float,
-    radius_std_m: float = 0.0,
-    wide=None,
-):
-    """Pick A from the local group, then B.
-
-    With probability `difficulty`, the target distance is a draw from
-    Normal(mean footprint radius, spread of those radii). B is the closest
-    site in `wide` (the world catalog when the caller passes it), so a long
-    draw can leave the local group. Otherwise B stays in `points`, uniform
-    inside the mean radius.
-    """
+def pair_ground_points(rng, points, coverage_m: float, far_p: float):
+    """Pick A, then B: with chance far_p farther than one-sat footprint, else inside it."""
     pts = np.asarray(points, dtype=float)
     n = len(pts)
     if n == 0:
         raise ValueError("Need at least one active ground point")
     i = int(rng.integers(n))
-    origin = (float(pts[i, 0]), float(pts[i, 1]))
-
-    # A long draw searches the whole catalog. A short draw stays in the local group.
-    if float(rng.random()) < float(difficulty):
-        pool = pts if wide is None else np.asarray(wide, dtype=float)
-        if len(pool) == 0:
-            return origin, origin
-        dist = np.array(haversine_m(origin[0], origin[1], pool[:, 0], pool[:, 1]), dtype=float, copy=True)
-        dist[dist < 1.0] = np.inf
-        if not np.isfinite(dist).any():
-            return origin, origin
-        target = max(float(rng.normal(mean_radius_m, max(float(radius_std_m), 0.0))), 0.0)
-        j = int(np.argmin(np.abs(dist - target)))
-        return origin, (float(pool[j, 0]), float(pool[j, 1]))
-
-    dist = np.array(haversine_m(origin[0], origin[1], pts[:, 0], pts[:, 1]), dtype=float, copy=True)
+    dist = haversine_m(pts[i, 0], pts[i, 1], pts[:, 0], pts[:, 1])
     dist[i] = np.inf
-    if not np.isfinite(dist).any():
-        return origin, origin
-    inside = np.flatnonzero(np.isfinite(dist) & (dist <= mean_radius_m))
-    j = int(rng.choice(inside)) if inside.size else int(np.argmin(dist))
-    return origin, (float(pts[j, 0]), float(pts[j, 1]))
+    far = np.flatnonzero(np.isfinite(dist) & (dist > coverage_m))
+    near = np.flatnonzero(np.isfinite(dist) & (dist <= coverage_m))
+    pool = far if rng.random() < far_p else near
+    if pool.size == 0:
+        pool = far if near.size == 0 else near
+    j = i if pool.size == 0 else int(rng.choice(pool))
+    return (float(pts[i, 0]), float(pts[i, 1])), (float(pts[j, 0]), float(pts[j, 1]))
 
 
 def _point_in_ring(lon: float, lat: float, ring) -> bool:
