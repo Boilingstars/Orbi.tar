@@ -15,29 +15,23 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 
-from orbi.coverage import load_ground_points, load_ground_region, pair_ground_points
+from orbi.coverage import load_ground_points, pair_ground_points
 from orbi.kepler import KeplerWorld
 from orbi.satellite import Satellite as SatelliteTemplate
 from tools.observation import Observation
 from tools.reward import Reward
 
 N_MAX = 48
-
-
-def job_slots(n_sats: int) -> int:
-    """Job rows in the network input, one per satellite."""
-    return max(int(n_sats), 1)
-PLAN_MAX = 192
+TOP_K = 32
+PLAN_MAX = 8192
 SAT_FEATURES = 14
-JOB_FEATURES = 14
-EDGE_FEATURES = 8
-GLOBAL_FEATURES = 7
-# global[GLOBAL_DOWNLINK_CAP] is downlink_limit / N_MAX. The decoder reads that cap back.
-GLOBAL_DOWNLINK_CAP = 4
+JOB_FEATURES = 13
+EDGE_FEATURES = 5
+GLOBAL_FEATURES = 6
 NEIGHBOR_MEMORY = 12
 NEIGHBOR_FEATURES = 7
 GROUND_POINTS = 64
-JOB_DIFFICULTY = 0.15
+FAR_JOB_P = 0.3
 
 SCENARIOS_DIR = Path(__file__).resolve().parents[1] / "example" / "scenarios"
 _ALIASES = {
@@ -129,13 +123,11 @@ class Task:
 
 @dataclass
 class EventConfig:
-    p_add_jobs: float = 1.0
+    p_add_jobs: float = 0.12
     p_outage: float = 0.05
-    add_jobs_count: tuple[int, int] = (16, 28)
+    add_jobs_count: tuple[int, int] = (1, 2)
     outage_sats: tuple[int, int] = (1, 3)
     outage_len: tuple[int, int] = (2, 8)
-    pool_min: int = 200
-    pool_max: int = 350
 
     @classmethod
     def off(cls) -> "EventConfig":
@@ -159,7 +151,7 @@ class OpsEnv(gym.Env):
         scenario: str | Path | dict = "p02",
         reward=None,
         observation=None,
-        top_k: int | None = None,
+        top_k: int = TOP_K,
         n_max: int = N_MAX,
         events: EventConfig | None = None,
         scripted_events: list[dict] | None = None,
@@ -169,8 +161,7 @@ class OpsEnv(gym.Env):
         neighbor_method: str = "competitors",
         neighbor_memory: int = NEIGHBOR_MEMORY,
         ground_points: int = GROUND_POINTS,
-        ground_region: str | None = None,
-        job_difficulty: float = JOB_DIFFICULTY,
+        far_job_p: float = FAR_JOB_P,
         cluster: list[str] | None = None,
         sat_cls=None,
         job_catalog=None,
@@ -187,7 +178,8 @@ class OpsEnv(gym.Env):
         self.cfg = scenario if isinstance(scenario, dict) else load(resolve_scenario(scenario))
         self.scenario = self.cfg
 
-        # Fleet width and the sampling knobs for this launch. Slot count follows the fleet.
+        # Slot count, fleet width, and the sampling knobs for this launch.
+        self.K = int(top_k)
         self.N = int(n_max)
         self.events_cfg = events if events is not None else EventConfig()
         self.scripted_events = list(scripted_events or [])
@@ -196,20 +188,13 @@ class OpsEnv(gym.Env):
         self.neighbor_method = str(neighbor_method)
         self.neighbor_memory = int(neighbor_memory)
         self.n_ground = max(2, int(ground_points))
-        self.job_difficulty = float(np.clip(job_difficulty, 0.0, 1.0))
-
-        # `world` keeps the random catalog draw. A region name takes the centre and its neighbours.
-        named = ground_region if ground_region is not None else (self.cfg.get("ground") or {}).get("region")
-        self.ground_region = None if named in (None, "", "world", "random") else str(named)
-        self.ground_catalog = load_ground_points()
-
+        self.far_job_p = float(np.clip(far_job_p, 0.0, 1.0))
         self.sat_cls = sat_cls
         self.job_catalog = job_catalog
         self._seed = seed
 
         specs = list(self.cfg["satellites"])
         self.n_sats = len(specs)
-        self.K = int(top_k) if top_k is not None else job_slots(self.n_sats)
         if self.n_sats > self.N:
             raise ValueError(f"Scenario has {self.n_sats} satellites, n_max={self.N}")
         self.sat_ids = [str(s["id"]) for s in specs]
@@ -440,26 +425,13 @@ class OpsEnv(gym.Env):
         return rows
 
     def _pick_active_points(self) -> np.ndarray:
-        # A named region is already ordered from its centre. The first m rows are the local group.
-        if self.ground_region:
-            catalog = load_ground_region(self.ground_region)
-            m = min(self.n_ground, len(catalog))
-            return np.array(catalog[:m], dtype=float, copy=True)
-
         catalog = load_ground_points()
         m = min(self.n_ground, len(catalog))
         idx = np.sort(self.rng.choice(len(catalog), size=m, replace=False))
         return catalog[idx]
 
     def _job_points(self) -> tuple[tuple[float, float], tuple[float, float]]:
-        return pair_ground_points(
-            self.rng,
-            self.active_points,
-            self.world.coverage_radius_m(),
-            self.job_difficulty,
-            self.world.coverage_radius_std_m(),
-            self.ground_catalog,
-        )
+        return pair_ground_points(self.rng, self.active_points, self.world.coverage_radius_m(), self.far_job_p)
 
     def _jobs(self):
         if self.job_catalog is None:
@@ -507,31 +479,9 @@ class OpsEnv(gym.Env):
                     self.sats[sid].outage_until = max(self.sats[sid].outage_until, end)
             self.ops_stats["events_outage"] += 1.0
 
-    def _open_job_count(self) -> int:
-        k = self.k
-        return sum(
-            1
-            for job in self.jobs.values()
-            if job["completed_step"] is None
-            and job["remaining_steps"] > 0
-            and job["release_step"] <= k < job["deadline_step"]
-        )
-
     def _emit_add_jobs(self, k: int) -> None:
-        open_n = self._open_job_count()
-        lo_pool = int(self.events_cfg.pool_min)
-        hi_pool = int(self.events_cfg.pool_max)
-        if hi_pool > 0 and open_n >= hi_pool:
-            return
         lo, hi = self.events_cfg.add_jobs_count
-        hi = max(int(hi), int(lo), 1)
-        count = int(self.rng.integers(int(lo), hi + 1))
-        if lo_pool > 0 and open_n < lo_pool:
-            count = max(count, min(hi, lo_pool - open_n))
-        if hi_pool > 0:
-            count = min(count, hi_pool - open_n)
-        if count <= 0:
-            return
+        count = int(self.rng.integers(lo, hi + 1))
         jobs = self._jobs().sample_added(self.rng, self, k, count, self._next_event_id())
         if jobs:
             self._apply_event({"type": "add_jobs", "jobs": jobs})
@@ -760,7 +710,6 @@ class OpsEnv(gym.Env):
 __all__ = [
     "EDGE_FEATURES",
     "EventConfig",
-    "GLOBAL_DOWNLINK_CAP",
     "GLOBAL_FEATURES",
     "JOB_FEATURES",
     "N_MAX",
@@ -776,12 +725,12 @@ __all__ = [
     "Reward",
     "SAT_FEATURES",
     "SCENARIOS_DIR",
-    "job_slots",
+    "TOP_K",
     "Task",
     "digest",
     "load",
     "resolve_scenario",
     "validate",
     "GROUND_POINTS",
-    "JOB_DIFFICULTY",
+    "FAR_JOB_P",
 ]

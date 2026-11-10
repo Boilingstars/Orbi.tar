@@ -5,13 +5,10 @@ Custom job fields are not listed here. A user package registers them with
 
 A run is stored under `experiments/runs/<dd_mm_yy_HH_MM>_<suite>_<policy>/`:
 
-- `train.log`     — human-readable SB3 stream, same as stdout
-- `progress.csv`  — numeric series
-- `config.json`   — hyperparameters, seed, scenario, event rates
-- `checkpoints/`  — periodic weight zips
-- `plots/`        — charts drawn from `progress.csv`
-- `model.zip`     — weights at the end of the run
-- `tb/`           — TensorBoard, enabled by flag
+- `train.log`    — human-readable SB3 stream, same as stdout
+- `progress.csv` — numeric series
+- `tb/`          — TensorBoard, enabled by flag
+- `config.json`  — hyperparameters, seed, scenario, event rates
 """
 
 from __future__ import annotations
@@ -122,8 +119,7 @@ def configure_run_logger(run_dir: Path | str, tensorboard: bool = False, resume:
         log_writer = HumanOutputFormat(log_file)
     else:
         csv_writer = CSVOutputFormat(str(csv_path))
-        log_file = open(log_path, "w", encoding="utf-8", buffering=1)
-        log_writer = HumanOutputFormat(log_file)
+        log_writer = HumanOutputFormat(str(log_path))
     outputs = [
         HumanOutputFormat(sys.stdout),
         log_writer,
@@ -154,7 +150,6 @@ class OpsMetricsCallback(BaseCallback):
         super().__init__(verbose)
         self._buffer: dict[str, list[float]] = {}
         self.episodes = 0
-        self._new_episodes = False
 
     def _add(self, key: str, value: float) -> None:
         self._buffer.setdefault(key, []).append(float(value))
@@ -185,24 +180,7 @@ class OpsMetricsCallback(BaseCallback):
                     self._add(dst, value)
         return True
 
-    def _on_training_start(self) -> None:
-        # Write one table only when at least one env finished a shift this
-        # rollout. A rollout as long as the episode always has summaries; a
-        # shorter one waits, so train/ and ops/ stay on the same row.
-        original = self.logger.dump
-
-        def _dump(step: int = 0, _write=original) -> None:
-            if not self._new_episodes:
-                return
-            _write(step)
-            self._new_episodes = False
-
-        self.logger.dump = _dump
-
     def _on_rollout_end(self) -> None:
-        self._new_episodes = bool(self._buffer)
-        if not self._new_episodes:
-            return
         for key, values in self._buffer.items():
             self.logger.record(key, float(np.mean(values)))
         self.logger.record("ops/episodes", self.episodes)

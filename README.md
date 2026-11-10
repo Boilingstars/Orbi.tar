@@ -9,7 +9,7 @@ License: [MIT](LICENSE).
 
 ## KeplerWorld
 
-`KeplerWorld` in `orbi/kepler.py` is the constellation geometry. Position is the analytic Kepler problem (ECI, then ECEF with Earth rotation). Eclipse is a cylindrical Earth shadow. `step` advances time; energy and temperature live on the satellite template in `orbi/satellite.py`. Visibility of job points A and B is `sees_job`: elevation at both ground points must meet `min_elevation_deg`. `coverage_radius_m()` is the mean footprint over the fleet, one radius per satellite altitude. Ground terminals come from `orbi/ground_points.json` (inhabited land, 100 km covering; rebuild with `py -3 -m orbi.coverage`). Each reset draws `ground_points` active sites from that catalog, or the first `m` of a named region (`ground_region` on `Run`). With chance `job_difficulty`, B is the world-catalog point closest to a Normal draw around that mean radius, so it can lie outside the local region; otherwise B is uniform inside the radius and stays in the local group.
+`KeplerWorld` in `orbi/kepler.py` is the constellation geometry. Position is the analytic Kepler problem (ECI, then ECEF with Earth rotation). Eclipse is a cylindrical Earth shadow. `step` advances time; energy and temperature live on the satellite template in `orbi/satellite.py`. Visibility of job points A and B is `sees_job`: elevation at both ground points must meet `min_elevation_deg`. Typical one-sat coverage radius is `coverage_radius_m()` from mean altitude. Ground terminals come from `orbi/ground_points.json` (inhabited land, 100 km covering; rebuild with `py -3 -m orbi.coverage`). Each reset draws `ground_points` active sites from that catalog (`m` on `Run` in `tools/training.py`). Job pairs A/B are near (distance ≤ coverage) with chance `1 - far_job_p`, and farther than coverage with chance `far_job_p`.
 
 The fleet and the element set are fixed at load. Satellites cannot be added, and orbits are not recomputed.
 
@@ -62,7 +62,7 @@ The single gym entry is `orbi.env.OpsEnv`. Train, greedy (`orbi.greedy`), and th
 
 ## Training
 
-`Run` in [tools/training.py](tools/training.py) sets the scenario, timesteps, seed, network profile, `ground_points` (`m` active terminals), `ground_region`, and `job_difficulty`. Seed drives jobs, events, sun, initial SoC, and which terminals are active; it does not change orbits. The command line does not override these fields.
+`Run` in [tools/training.py](tools/training.py) sets the scenario, timesteps, seed, network profile, `ground_points` (`m` active terminals), and `far_job_p` (`x`). Seed drives jobs, events, sun, initial SoC, and which terminals are active; it does not change orbits. The command line does not override these fields.
 
 ```bash
 py -3 -m example.train
