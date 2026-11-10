@@ -1,0 +1,373 @@
+{
+  "id": "P01_intro",
+  "meta": {
+    "id": "P01_intro",
+    "title": "Intro shift: 16 satellites"
+  },
+  "time": {
+    "step_s": 300,
+    "steps": 288
+  },
+  "model": {
+    "reserve_soc_pct": 30.0,
+    "critical_soc_pct": 20.0,
+    "charge_efficiency": 0.92,
+    "discharge_efficiency": 0.95,
+    "thermal_tau_s": 1800.0,
+    "thermal_gain_c_per_w": 0.2,
+    "heater_below_c": 5.0,
+    "payload_min_c": -5.0,
+    "payload_max_c": 45.0,
+    "charge_min_c": 0.0,
+    "charge_max_c": 45.0,
+    "calibration_valid_steps": 23,
+    "downlink_parallel_limit": 2,
+    "sun_target_c": 20.0,
+    "eclipse_target_c": 5.0,
+    "min_elevation_deg": 10.0
+  },
+  "ground": {
+    "region": "europe"
+  },
+  "jobs": {
+    "initial": 16
+  },
+  "satellites": [
+    {
+      "id": "S01",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 0.0
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 66.54,
+      "initial_temp_c": 15.58,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 14,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S02",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 45.0
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 62.3,
+      "initial_temp_c": 19.2,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 29,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S03",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 90.0
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 78.21,
+      "initial_temp_c": 14.25,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 31,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S04",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 135.0
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 66.87,
+      "initial_temp_c": 19.89,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 1,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S05",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 180.0
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 74.06,
+      "initial_temp_c": 13.8,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 26,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S06",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 225.0
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 76.73,
+      "initial_temp_c": 17.07,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 15,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S07",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 270.0
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 75.83,
+      "initial_temp_c": 23.61,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 31,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S08",
+      "orbit": {
+        "raan_deg": 0.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 315.0
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 69.79,
+      "initial_temp_c": 14.25,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 24,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S09",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 7.5
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 68.65,
+      "initial_temp_c": 18.13,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 24,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S10",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 52.5
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 79.39,
+      "initial_temp_c": 15.82,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 32,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S11",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 97.5
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 83.11,
+      "initial_temp_c": 17.65,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 20,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S12",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 142.5
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 62.68,
+      "initial_temp_c": 13.25,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 24,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S13",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 187.5
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 65.05,
+      "initial_temp_c": 22.61,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 18,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S14",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 232.5
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 81.23,
+      "initial_temp_c": 19.73,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 24,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S15",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 277.5
+      },
+      "capacity_wh": 140.0,
+      "initial_soc_pct": 70.16,
+      "initial_temp_c": 18.2,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 28,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    },
+    {
+      "id": "S16",
+      "orbit": {
+        "raan_deg": 60.0,
+        "period_min": 115.8256,
+        "inclination_deg": 51.6,
+        "altitude_km": 1500.0,
+        "mean_anomaly_deg": 322.5
+      },
+      "capacity_wh": 100.0,
+      "initial_soc_pct": 81.55,
+      "initial_temp_c": 17.26,
+      "base_w": 18.0,
+      "heater_w": 30.0,
+      "calibration_w": 20.0,
+      "downlink_w": 90.0,
+      "relay_w": 65.0,
+      "initial_calibration_age_steps": 21,
+      "panel_area_m2": 0.25,
+      "panel_efficiency": 0.2
+    }
+  ]
+}
