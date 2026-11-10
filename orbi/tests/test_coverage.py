@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from orbi.constants import R_EARTH
 from orbi.coverage import (
@@ -74,6 +75,31 @@ def test_overhead_access_remaining_positive():
     assert world.access_remaining(0, far_lat, far_lon, world.t) == 0.0
 
 
+def test_access_end_matches_remaining_when_in_view():
+    world = KeplerWorld.walker(n_sats=4, n_planes=2, altitude_m=1500e3)
+    world.reset(seed=0)
+    lat, lon, _ = world.lla(0)
+    remaining, nxt = world.access_windows(0, ((lat, lon),), world.t)
+    end = world.access_end(0, ((lat, lon),), world.t, skip_passes=0)
+    assert nxt == 0.0
+    assert end == pytest.approx(world.t + remaining)
+    far = (lat + np.deg2rad(80.0), lon)
+    assert world.access_end(0, (far,), world.t, skip_passes=0) >= 0.0
+
+
+def test_access_next_zero_when_in_view():
+    world = KeplerWorld.walker(n_sats=4, n_planes=2, altitude_m=1500e3)
+    world.reset(seed=0)
+    lat, lon, _ = world.lla(0)
+    remaining, nxt = world.access_windows(0, ((lat, lon),), world.t)
+    assert remaining > 60.0
+    assert nxt == 0.0
+    far = (lat + np.deg2rad(80.0), lon)
+    remaining, nxt = world.access_windows(0, (far,), world.t)
+    assert remaining == 0.0
+    assert nxt >= 0.0
+
+
 def test_kepler_time_advances_on_step():
     world = KeplerWorld.walker(n_sats=4, n_planes=2)
     world.reset(seed=2)
@@ -84,6 +110,17 @@ def test_kepler_time_advances_on_step():
 def test_ground_catalog_is_dense():
     pts = load_ground_points()
     assert len(pts) > 2000
+
+
+def test_europe_points_grow_from_the_center():
+    from orbi.coverage import load_ground_region
+
+    pts = load_ground_region("europe")
+    assert len(pts) > 64
+    dist = haversine_m(pts[0, 0], pts[0, 1], pts[:, 0], pts[:, 1])
+    assert dist[0] == 0.0
+    assert np.all(np.diff(dist) >= -1.0)
+    assert dist[63] < dist[-1]
 
 
 def test_haversine_equator_quarter():
@@ -105,20 +142,25 @@ def test_sees_job_requires_both_points():
 
 
 class _Pick:
-    def __init__(self, i: int) -> None:
+    def __init__(self, i: int, roll: float = 0.0, draw: float | None = None) -> None:
         self.i = i
+        self.roll = roll
+        self.draw = draw
 
     def integers(self, n):
         return self.i
 
     def random(self):
-        return 0.0
+        return self.roll
+
+    def normal(self, loc, scale):
+        return loc if self.draw is None else self.draw
 
     def choice(self, pool):
         return pool[0]
 
 
-def test_pair_ground_points_near_and_far():
+def test_pair_ground_points_easy_and_hard():
     pts = np.array(
         [
             [0.0, 0.0],
@@ -127,12 +169,29 @@ def test_pair_ground_points_near_and_far():
         ]
     )
     cover = haversine_m(0.0, 0.0, 0.0, np.deg2rad(20.0))
-    near = pair_ground_points(_Pick(0), pts, cover, far_p=0.0)
-    far = pair_ground_points(_Pick(0), pts, cover, far_p=1.0)
-    d_near = haversine_m(near[0][0], near[0][1], near[1][0], near[1][1])
-    d_far = haversine_m(far[0][0], far[0][1], far[1][0], far[1][1])
-    assert d_near <= cover + 1.0
-    assert d_far > cover
+    ring = haversine_m(0.0, 0.0, 0.0, np.deg2rad(80.0))
+    easy = pair_ground_points(_Pick(0, roll=1.0), pts, cover, difficulty=0.0)
+    hard = pair_ground_points(_Pick(0, roll=0.0, draw=ring), pts, cover, difficulty=1.0, radius_std_m=1.0)
+    d_easy = haversine_m(easy[0][0], easy[0][1], easy[1][0], easy[1][1])
+    d_hard = haversine_m(hard[0][0], hard[0][1], hard[1][0], hard[1][1])
+    assert d_easy <= cover + 1.0
+    assert abs(d_hard - ring) < 1.0
+
+
+def test_hard_pair_can_leave_the_local_group():
+    local = np.array([[0.0, 0.0], [0.0, np.deg2rad(2.0)]])
+    far_lon = np.deg2rad(40.0)
+    wide = np.vstack([local, [[0.0, far_lon]]])
+    ring = haversine_m(0.0, 0.0, 0.0, far_lon)
+    _origin, other = pair_ground_points(
+        _Pick(0, roll=0.0, draw=ring),
+        local,
+        ring,
+        1.0,
+        1.0,
+        wide=wide,
+    )
+    assert abs(other[1] - far_lon) < 1e-9
 
 
 def test_access_remaining_helper_zero_if_not_in_view():

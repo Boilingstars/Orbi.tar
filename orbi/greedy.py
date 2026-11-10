@@ -80,7 +80,13 @@ def run(scenario="p02", seed: int = 0) -> dict:
     from orbi.env import EventConfig, OpsEnv, load, resolve_scenario
 
     spec = load(resolve_scenario(scenario) if not isinstance(scenario, dict) else scenario)
-    env = OpsEnv(scenario=spec, events=EventConfig.off(), seed=seed)
+    named = ((spec.get("ground") or {}).get("region"))
+    env = OpsEnv(
+        scenario=spec,
+        events=EventConfig.off(),
+        seed=seed,
+        ground_region=None if named in (None, "", "world", "random") else str(named),
+    )
 
     # Same episode loop the evaluator uses. This entry only keeps the shift totals.
     from tools.evaluating import run_episode

@@ -46,7 +46,7 @@ class UniformRange:
         self.lo = int(lo)
         self.hi = int(hi)
 
-    def sample(self, rng: np.random.Generator) -> int:
+    def sample(self, rng: np.random.Generator, env=None) -> int:
         return int(rng.integers(self.lo, self.hi + 1))
 
 
@@ -62,29 +62,28 @@ class WeightedLaw:
             raise ValueError("duration weights must sum to a positive number")
         self.weights = [float(w) / total for w in weights]
 
-    def sample(self, rng: np.random.Generator) -> int:
+    def sample(self, rng: np.random.Generator, env=None) -> int:
         return int(rng.choice(self.values, p=self.weights))
 
 
 class SeePoints:
     """The satellite must see every ground point: A, A+B, or A+B+C, ...
 
-    `far_p` is the chance the next point lies outside one satellite's footprint.
-    `None` uses the environment's `far_job_p`.
+    B is drawn by `env.job_difficulty`: that chance places it on the world
+    catalog near the fleet's mean coverage radius, so it can leave the local
+    group. The other draws stay inside the radius and inside the local group.
     """
 
-    def __init__(self, n: int, far_p: float | None = None) -> None:
+    def __init__(self, n: int) -> None:
         if n < 1:
             raise ValueError("see-points needs at least one ground point")
         self.n = int(n)
-        self.far_p = far_p
 
     @property
     def name(self) -> str:
         return f"see_{self.n}"
 
     def place(self, rng: np.random.Generator, env) -> dict:
-        far_p = env.far_job_p if self.far_p is None else float(self.far_p)
         pts = env.active_points
         if self.n == 1:
             i = int(rng.integers(len(pts)))
@@ -95,11 +94,13 @@ class SeePoints:
                 "point_b": point,
                 "addressed": None,
             }
-        coverage = env.world.coverage_radius_m()
-        first, second = pair_ground_points(rng, pts, coverage, far_p)
+        mean_r = env.world.coverage_radius_m()
+        std_r = env.world.coverage_radius_std_m()
+        wide = env.ground_catalog
+        first, second = pair_ground_points(rng, pts, mean_r, env.job_difficulty, std_r, wide)
         points = [first, second]
         while len(points) < self.n:
-            _anchor, extra = pair_ground_points(rng, pts, coverage, far_p)
+            _anchor, extra = pair_ground_points(rng, pts, mean_r, env.job_difficulty, std_r, wide)
             points.append(extra)
         return {
             "points": points,
@@ -147,8 +148,8 @@ class JobType:
         release: int | None = None,
     ) -> dict | None:
         # Duration and slack. A mid-episode job that would end past the shift is dropped.
-        work = int(self.work.sample(rng))
-        slack = int(self.slack.sample(rng))
+        work = int(self.work.sample(rng, env))
+        slack = int(self.slack.sample(rng, env))
         if release is None:
             horizon = max(1, env.steps_total - work - slack)
             release = int(rng.integers(0, horizon))

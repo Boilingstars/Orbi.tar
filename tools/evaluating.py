@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from orbi.env import FAR_JOB_P, GROUND_POINTS, EventConfig, OpsEnv, load, resolve_scenario
+from orbi.env import GROUND_POINTS, JOB_DIFFICULTY, EventConfig, OpsEnv, load, resolve_scenario
 from orbi.greedy import greedy_action, random_masked_action
 
 
@@ -27,9 +27,9 @@ class Eval:
     episodes: int = 1
     events: str = "demo"
     seed: int = 0
-    top_k: int = 32
+    top_k: int | None = None
     ground_points: int = GROUND_POINTS
-    far_job_p: float = FAR_JOB_P
+    job_difficulty: float = JOB_DIFFICULTY
     journal: str | None = None
     deterministic: bool = False
 
@@ -61,9 +61,9 @@ def parse(models: list, argv: list[str] | None = None) -> Eval:
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--events", default="demo", choices=["demo", "random", "none"])
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--top-k", type=int, default=32)
+    parser.add_argument("--top-k", type=int, default=None)
     parser.add_argument("--ground-points", type=int, default=GROUND_POINTS)
-    parser.add_argument("--far-job-p", type=float, default=FAR_JOB_P)
+    parser.add_argument("--job-difficulty", type=float, default=JOB_DIFFICULTY)
     parser.add_argument("--journal", default=None, help="directory for journal_<episode>.json")
     parser.add_argument(
         "--deterministic",
@@ -80,7 +80,7 @@ def parse(models: list, argv: list[str] | None = None) -> Eval:
         seed=args.seed,
         top_k=args.top_k,
         ground_points=args.ground_points,
-        far_job_p=args.far_job_p,
+        job_difficulty=args.job_difficulty,
         journal=args.journal,
         deterministic=args.deterministic,
     )
@@ -179,7 +179,7 @@ def evaluate(settings: Eval, models: list | None = None) -> dict:
         top_k=settings.top_k,
         seed=settings.seed,
         ground_points=settings.ground_points,
-        far_job_p=settings.far_job_p,
+        job_difficulty=settings.job_difficulty,
     )
     actor = _actor(settings, env, rng, models)
     if _neural(settings.policy, models) and not settings.deterministic:

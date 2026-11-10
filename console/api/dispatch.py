@@ -270,7 +270,6 @@ def iter_events(
         scenario=scenario,
         events=EventConfig.off(),
         scripted_events=list(scripted_events or []),
-        top_k=32,
         seed=0,
     )
     obs, _ = env.reset(seed=0)
