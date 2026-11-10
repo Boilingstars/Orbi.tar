@@ -134,9 +134,29 @@ class KeplerWorld:
     def typical_altitude_m(self) -> float:
         return float(np.mean([float(row["altitude_km"]) * 1e3 for row in self.orbits]))
 
+    def coverage_radii_m(self) -> np.ndarray:
+        """One footprint radius per satellite, from that satellite's altitude."""
+        return np.array(
+            [geo.footprint_radius(float(row["altitude_km"]) * 1e3, self.min_elev) for row in self.orbits],
+            dtype=float,
+        )
+
     def coverage_radius_m(self) -> float:
-        """Typical one-satellite footprint radius on the surface, metres."""
-        return geo.footprint_radius(self.typical_altitude_m(), self.min_elev)
+        """Mean footprint radius over the fleet, metres."""
+        radii = self.coverage_radii_m()
+        if len(radii) == 0:
+            return geo.footprint_radius(self.typical_altitude_m(), self.min_elev)
+        return float(np.mean(radii))
+
+    def coverage_radius_std_m(self) -> float:
+        """Spread of the per-satellite footprint radii, metres."""
+        radii = self.coverage_radii_m()
+        if len(radii) < 2:
+            return 0.0
+
+        # Identical altitudes leave a few ulps of noise. That is not a real spread.
+        spread = float(np.std(radii))
+        return 0.0 if spread < 1.0 else spread
 
     def elevation(self, sat_i: int, lat: float, lon: float, t: float | None = None) -> float:
         t_use = self.t if t is None else t
@@ -158,21 +178,71 @@ class KeplerWorld:
         return self._above(r_sat, a[0], a[1]) and self._above(r_sat, b[0], b[1])
 
     def access_remaining(self, sat_i: int, lat: float, lon: float, t_query: float) -> float:
-        key = (sat_i, round(lat, 5), round(lon, 5), round(float(t_query), 1))
+        remaining, _nxt = self.access_windows(sat_i, ((lat, lon),), t_query)
+        return remaining
 
-        def compute() -> float:
-            return geo.access_remaining(
-                lambda tau, i=sat_i: self.r_eci(i, tau),
-                lat,
-                lon,
-                t_query,
-                self.min_elev,
-                gmst0=self.gmst0,
-                max_horizon=0.25 * self.periods_s[sat_i],
-                dt=8.0,
-            )
+    def access_next(self, sat_i: int, lat: float, lon: float, t_query: float) -> float:
+        _remaining, nxt = self.access_windows(sat_i, ((lat, lon),), t_query)
+        return nxt
+
+    def access_windows(self, sat_i: int, points, t_query: float | None = None, step_s: float = 300.0) -> tuple[float, float]:
+        """Seconds this satellite keeps / waits for joint view of `points`.
+
+        Sampled at the env tick so a shift step does not walk the orbit at 20 s.
+        """
+        t_use = self.t if t_query is None else float(t_query)
+        pts = tuple((round(float(lat), 5), round(float(lon), 5)) for lat, lon in points)
+        step = max(float(step_s), 1.0)
+        key = (sat_i, pts, round(t_use, 1), round(step, 1))
+
+        def compute() -> tuple[float, float]:
+            period = float(self.periods_s[sat_i])
+            horizon = max(int(round(period / step)), 1)
+
+            def visible(t: float) -> bool:
+                if not pts:
+                    return False
+                r_sat = self.r_ecef(sat_i, t)
+                return all(self._above(r_sat, lat, lon) for lat, lon in pts)
+
+            if visible(t_use):
+                remaining = 0.5 * step
+                for k in range(1, horizon + 1):
+                    if not visible(t_use + k * step):
+                        break
+                    remaining = k * step
+                return remaining, 0.0
+
+            for k in range(1, horizon + 1):
+                if visible(t_use + k * step):
+                    return 0.0, k * step
+            return 0.0, period
 
         return self._stored(self._access_cache, key, 4096, compute)
+
+    def access_end(self, sat_i: int, points, t_query: float | None = None, skip_passes: int = 0, step_s: float = 300.0) -> float:
+        """Absolute time when the (skip_passes+1)-th joint access ends. 0 if none."""
+        t_use = self.t if t_query is None else float(t_query)
+        skip = max(int(skip_passes), 0)
+        step = max(float(step_s), 1.0)
+        period = float(self.periods_s[sat_i])
+        t = t_use
+        seen = 0
+        t_limit = t_use + (skip + 2) * period
+        while t <= t_limit + 1e-9:
+            remaining, nxt = self.access_windows(sat_i, points, t, step_s=step)
+            if remaining > 0:
+                end = t + remaining
+                if seen >= skip:
+                    return end
+                seen += 1
+                t = end + step
+                continue
+
+            if nxt <= 0 or nxt >= period - 1e-9:
+                return 0.0
+            t = t + nxt
+        return 0.0
 
     def time_to_sun_change(self, sat_i: int) -> float:
         key = (sat_i, round(self.t, 1))
