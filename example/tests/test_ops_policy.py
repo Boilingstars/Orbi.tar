@@ -314,8 +314,8 @@ def test_pointer_and_encoder_receive_grad():
     assert encoder and any(float(grad.abs().sum()) > 0 for grad in encoder)
 
 
-def test_replay_log_prob_matches_the_sample():
-    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0)
+def _replay_matches(scenario, **kwargs) -> None:
+    env = OpsEnv(scenario=scenario, events=EventConfig.off(), seed=0, **kwargs)
     obs, _ = env.reset(seed=0)
     net = OpsAttentionNet(**_SMALL).eval()
     batch = {key: torch.from_numpy(value[None]).float() for key, value in obs.items()}
@@ -328,6 +328,16 @@ def test_replay_log_prob_matches_the_sample():
         assert torch.allclose(sampled, replayed, atol=1e-5)
         ratio = torch.exp(replayed - sampled)
         assert torch.allclose(ratio, torch.ones_like(ratio), atol=1e-4)
+
+
+def test_replay_log_prob_matches_the_sample():
+    _replay_matches("p01")
+
+
+def test_replay_log_prob_matches_on_p03_k64():
+    from orbi.env import P03_ENERGY
+
+    _replay_matches(load(P03_ENERGY), top_k=64)
 
 
 def test_matching_short_window_can_beat_worth():

@@ -179,6 +179,66 @@ def test_local_actor_and_ctde_are_finite():
     assert torch.isfinite(logits).all() and torch.isfinite(value).all()
 
 
+def test_executable_count_follows_calibration_on_the_same_step():
+    env = _env()
+    env.reset(seed=0)
+    control = env.ground_control
+    job = next(item for item in env.jobs.values() if control._executable(env, item) > 0)
+    assert env._executable_cache is None
+    for sid in control._eligible(env, job):
+        env.sats[sid].calibration_age_steps = env.calibration_valid
+    assert control._executable(env, job) == 0
+
+
+def test_executable_count_does_not_leak_across_reset():
+    env = _env()
+    env.reset(seed=0)
+    env.ground_control._executable_cache = (0, {"J000": 999})
+    env.reset(seed=1)
+    control = env.ground_control
+    job = env.jobs["J000"]
+    count = control._executable(env, job)
+    live = 0
+    action = {"action": "job", "job_id": job["id"]}
+    for sid in control._eligible(env, job):
+        ok, _reason, _power = env.can_execute(sid, action)
+        live += int(ok)
+    assert count == live
+    assert count != 999
+
+
+def test_snapshot_reuses_the_executable_count():
+    from tools.observation import collect
+
+    env = _env()
+    env.reset(seed=0)
+    calls = {"n": 0}
+    real = env.can_execute
+
+    def wrapped(sid, action):
+        if action.get("action") == "job":
+            calls["n"] += 1
+        return real(sid, action)
+
+    env.can_execute = wrapped
+    collect(env, env.ground_control)
+    assert calls["n"] > 0
+    assert env._executable_cache is None
+
+    # The second rank of this snapshot must not ask the satellites again.
+    known = env.observation.known_jobs(env)
+    env._executable_cache = {}
+    calls["n"] = 0
+    for job in known:
+        env.ground_control.job_rank(env, job)
+    assert calls["n"] > 0
+    calls["n"] = 0
+    for job in known:
+        env.ground_control.job_rank(env, job)
+    assert calls["n"] == 0
+    env._executable_cache = None
+
+
 def test_neighbor_view_rejects_unknown_method():
     try:
         NeighborView(method="radio")

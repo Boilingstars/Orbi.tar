@@ -13,23 +13,53 @@ from pathlib import Path
 
 import numpy as np
 
-from orbi.env import GROUND_POINTS, JOB_DIFFICULTY, EventConfig, OpsEnv, load, resolve_scenario
+from orbi.env import (
+    GROUND_POINTS,
+    JOB_DIFFICULTY,
+    NEIGHBOR_MEMORY,
+    EventConfig,
+    OpsEnv,
+    load,
+    resolve_scenario,
+)
 from orbi.greedy import greedy_action, random_masked_action
+
+
+# Same names as `Run`. Train, the greedy anchor, and evaluation read this list.
+SHIFT_FIELDS = (
+    "top_k",
+    "baseline_repair",
+    "neighbor_method",
+    "neighbor_memory",
+    "ground_points",
+    "ground_region",
+    "job_difficulty",
+)
+
+
+def shift_kwargs(source) -> dict:
+    """One shift's sampling and slot fields. Callers still pass the scenario and events."""
+    return {name: getattr(source, name) for name in SHIFT_FIELDS}
 
 
 @dataclass
 class Eval:
     """One evaluation. `launch` fills this from the command line."""
 
-    scenario: str = "p02"
+    scenario: str = "p03"
     policy: str = "greedy"
     model: str | None = None
     episodes: int = 1
     events: str = "demo"
     seed: int = 0
-    top_k: int | None = None
+    top_k: int | None = 64
     ground_points: int = GROUND_POINTS
+    ground_region: str | None = "world"
     job_difficulty: float = JOB_DIFFICULTY
+    baseline_repair: bool = False
+    neighbor_method: str = "competitors"
+    neighbor_memory: int = NEIGHBOR_MEMORY
+    scripted_events: list | None = None
     journal: str | None = None
     deterministic: bool = False
 
@@ -55,13 +85,13 @@ def parse(models: list, argv: list[str] | None = None) -> Eval:
     """Read the fixed evaluation flags. `models` are the package's neural policies."""
     names = ["greedy", "random", "ppo", *(model.__name__ for model in models)]
     parser = argparse.ArgumentParser(description="Evaluate a policy on a shift scenario")
-    parser.add_argument("--scenario", default="p02")
+    parser.add_argument("--scenario", default="p03")
     parser.add_argument("--policy", default="greedy", choices=names)
     parser.add_argument("--model", default=None)
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--events", default="demo", choices=["demo", "random", "none"])
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--top-k", type=int, default=None)
+    parser.add_argument("--top-k", type=int, default=64)
     parser.add_argument("--ground-points", type=int, default=GROUND_POINTS)
     parser.add_argument("--job-difficulty", type=float, default=JOB_DIFFICULTY)
     parser.add_argument("--journal", default=None, help="directory for journal_<episode>.json")
@@ -176,10 +206,9 @@ def evaluate(settings: Eval, models: list | None = None) -> dict:
     env = OpsEnv(
         scenario=spec,
         events=events,
-        top_k=settings.top_k,
         seed=settings.seed,
-        ground_points=settings.ground_points,
-        job_difficulty=settings.job_difficulty,
+        scripted_events=list(settings.scripted_events or []),
+        **shift_kwargs(settings),
     )
     actor = _actor(settings, env, rng, models)
     if _neural(settings.policy, models) and not settings.deterministic:

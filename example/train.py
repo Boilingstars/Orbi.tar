@@ -29,7 +29,7 @@ from example.plots import plot_run
 from orbi import load, resolve_scenario
 from orbi.env import N_MAX, EventConfig, OpsEnv
 from orbi.greedy import greedy_action
-from tools.evaluating import load_ppo, run_episode
+from tools.evaluating import load_ppo, run_episode, shift_kwargs
 from tools.training import Session, Trainer, launch
 
 
@@ -364,15 +364,9 @@ def _make_env(run, spec: dict, events: EventConfig, seed: int):
         env = OpsEnv(
             scenario=spec,
             events=events,
-            top_k=run.top_k,
             max_steps=run.max_steps,
             seed=seed,
-            baseline_repair=run.baseline_repair,
-            neighbor_method=run.neighbor_method,
-            neighbor_memory=run.neighbor_memory,
-            ground_points=run.ground_points,
-            ground_region=run.ground_region,
-            job_difficulty=run.job_difficulty,
+            **shift_kwargs(run),
         )
         return ActionMasker(_ScaleReward(Monitor(env)), mask_fn)
 
@@ -524,9 +518,7 @@ class _GreedyAnchor(BaseCallback):
             scenario=spec,
             events=events,
             seed=0,
-            ground_points=self._run.ground_points,
-            ground_region=self._run.ground_region,
-            job_difficulty=self._run.job_difficulty,
+            **shift_kwargs(self._run),
         )
         row = run_episode(env, lambda obs: greedy_action(obs, downlink_limit=env.downlink_limit), seed=0)
         summary = row.get("summary") or {}

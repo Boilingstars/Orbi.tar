@@ -53,9 +53,13 @@ def job_view(env, job: dict, sat_ids: list[str] | None = None) -> dict:
         if not points or not job_visible(env.world, sat.index, job):
             continue
 
-        # Seconds left in this joint pass. The rise after a gap is filled on packed edges.
-        remaining, _nxt = env.world.access_windows(sat.index, points, env.world.t)
         visible.append(sat.index)
+
+        # Ranking uses the pass length only for a job that is open on this tick.
+        # A later slot still asks access_windows for its own edge.
+        if not (job["release_step"] <= env.k < job["deadline_step"]):
+            continue
+        remaining, _nxt = env.world.access_windows(sat.index, points, env.world.t)
         windows[sat.index] = (float(remaining), 0.0)
         remainings.append(float(remaining))
 
@@ -83,12 +87,26 @@ def collect(env, control) -> dict:
         if j["completed_step"] is None and j["remaining_steps"] > 0 and j["deadline_step"] > env.k
     ]
     open_jobs = [j for j in known if j["release_step"] <= env.k < j["deadline_step"]]
-    views = {} if finished else {job["id"]: job_view(env, job, control.sat_ids) for job in known}
-    env._job_views = views
-    candidates = [] if finished else control.select_jobs(env, known)
-    env._candidates = candidates
-    packed = {cand.job_id for cand in candidates}
 
+    # Admissibility counts live for this snapshot only. `reset` must not see them.
+    env._executable_cache = {}
+    env._execute_cache = {}
+    env.world._visible_cache = {}
+    try:
+        views = {} if finished else {job["id"]: job_view(env, job, control.sat_ids) for job in known}
+        env._job_views = views
+        candidates = [] if finished else control.select_jobs(env, known)
+        env._candidates = candidates
+        packed = {cand.job_id for cand in candidates}
+        return _snapshot(env, control, k, finished, dt, period, known, open_jobs, views, candidates, packed)
+    finally:
+        env._executable_cache = None
+        env._execute_cache = None
+        env.world._visible_cache = None
+
+
+def _snapshot(env, control, k, finished, dt, period, known, open_jobs, views, candidates, packed) -> dict:
+    """Fleet rows, legal mask, and packed edges. The admissibility cache is still open."""
     # One row per satellite: charge, contact, and time until the light changes.
     fleet = []
     soc = np.zeros(env.n_sats, dtype=np.float32)
@@ -171,6 +189,16 @@ def collect(env, control) -> dict:
             if job["kind"] == "downlink" and mask[:, slot].any():
                 downlink_demand += 1
             slots.append({"job": job, "edges": edges, "view": view})
+
+        # Queue pressure for the episode log. Counts are already on this snapshot.
+        if getattr(env, "_queue", None) is not None:
+            counts = env._executable_cache or {}
+            exec_ids = [job_id for job_id, n in counts.items() if n > 0]
+            env._queue["ticks"] += 1.0
+            env._queue["feasible_edges"] += float(mask[: env.n_sats, : env.K].sum())
+            env._queue["executable_jobs"] += float(len(exec_ids))
+            env._queue["executors"] += float(sum(counts[job_id] for job_id in exec_ids))
+            env._queue["outside_slots"] += float(sum(job_id not in packed for job_id in exec_ids))
     env._mask = mask
     return {
         "k": k,

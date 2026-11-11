@@ -212,6 +212,61 @@ def test_no_contact_blocks_job():
     assert not ok and reason == "no_contact"
 
 
+def test_calibration_counters_record_a_fresh_calibrate():
+    env = _env()
+    env.reset(seed=0)
+    env.sats[env.sat_ids[0]].calibration_age_steps = 0
+    action = _all_idle(env)
+    action[0] = env.calibrate_index
+    env.step(action)
+    assert env.ops_stats["cal_count"] == 1.0
+    assert env.ops_stats["cal_while_valid"] == 1.0
+    assert env.ops_stats["cal_soon"] == 1.0
+    assert env.ops_stats["cal_with_job"] + env.ops_stats["cal_without_job"] == 1.0
+    metrics = env._episode_metrics()
+    assert metrics["cal_age_mean"] == 0.0
+    assert metrics["feasible_edges"] > 0.0
+    assert "revenue_per_downlink_tick" in metrics
+    assert "executable_outside_slots" in metrics
+
+
+def test_mask_matches_can_execute_on_packed_slots():
+    env = _env("p01", top_k=8)
+    env.reset(seed=0)
+    for slot, cand in enumerate(env._candidates):
+        action = {"action": "job", "job_id": cand.job_id}
+        for i in cand.sats:
+            ok, _reason, _power = env.can_execute(env.sat_ids[i], action)
+            assert bool(env._mask[i, slot]) is bool(ok)
+
+
+def test_horizon_check_matches_elevation():
+    import orbi.coverage as geo
+
+    env = _env("p01")
+    env.reset(seed=0)
+    world = env.world
+    for sat_i in range(env.n_sats):
+        r_sat = world.r_ecef(sat_i)
+        for lat, lon in env.active_points[:8]:
+            above = world._above(r_sat, float(lat), float(lon))
+            elev = geo.elevation(r_sat, geo.lla_to_ecef(float(lat), float(lon))) >= world.min_elev
+            assert above is elev
+
+
+def test_training_and_eval_share_shift_fields():
+    from tools.evaluating import Eval, shift_kwargs
+    from tools.training import Run
+
+    assert Run().scenario == Eval().scenario == "p03"
+    assert shift_kwargs(Run()) == shift_kwargs(Eval())
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=0, **shift_kwargs(Run()))
+    assert env.K == 64
+    assert env.n_ground == 64
+    assert env.job_difficulty == 0.15
+    assert env.ground_region is None
+
+
 def test_packed_slots_set_ever_packed():
     env = _env("p01")
     env.reset(seed=0)

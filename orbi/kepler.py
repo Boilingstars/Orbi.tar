@@ -25,6 +25,10 @@ class KeplerWorld:
         self._rng = np.random.default_rng()
         self._access_cache: dict = {}
         self._sun_cache: dict = {}
+        self._eci_cache: dict = {}
+        self._ecef_cache: dict = {}
+        self._ground_ecef: dict = {}
+        self._sin_min_sq = float(np.sin(self.min_elev) ** 2)
         self._rebuild_elements()
 
     def _rebuild_elements(self) -> None:
@@ -98,6 +102,8 @@ class KeplerWorld:
         )
         self._access_cache = {}
         self._sun_cache = {}
+        self._eci_cache = {}
+        self._ecef_cache = {}
 
     def _stored(self, cache: dict, key, limit: int, compute):
         cached = cache.get(key)
@@ -110,19 +116,58 @@ class KeplerWorld:
         return value
 
     def _above(self, r_sat: np.ndarray, lat: float, lon: float) -> bool:
-        return geo.elevation(r_sat, geo.lla_to_ecef(lat, lon)) >= self.min_elev
+        """Same boolean as `elevation >= min_elev`, without a trig call on the hot path."""
+        if self.min_elev <= 0.0:
+            return geo.elevation(r_sat, geo.lla_to_ecef(lat, lon)) >= self.min_elev
+
+        # One ECEF point per ground site. The fleet asks the same sites many times a tick.
+        key = (round(float(lat), 5), round(float(lon), 5))
+        tgt = self._ground_ecef.get(key)
+        if tgt is None:
+            tgt = geo.lla_to_ecef(lat, lon)
+            self._ground_ecef[key] = tgt
+        dx = float(r_sat[0]) - float(tgt[0])
+        dy = float(r_sat[1]) - float(tgt[1])
+        dz = float(r_sat[2]) - float(tgt[2])
+        rho2 = dx * dx + dy * dy + dz * dz
+        if rho2 < 1.0:
+            return False
+        up2 = float(tgt[0]) ** 2 + float(tgt[1]) ** 2 + float(tgt[2]) ** 2
+        if up2 < 1.0:
+            return False
+        dot = dx * float(tgt[0]) + dy * float(tgt[1]) + dz * float(tgt[2])
+
+        # min elevation is above the horizon, so a downward line of sight fails.
+        if dot <= 0.0:
+            return False
+        return dot * dot >= self._sin_min_sq * rho2 * up2
+
+    def _time_key(self, t: float | None) -> float:
+        t_use = self.t if t is None else float(t)
+        return round(t_use, 1)
 
     def r_eci(self, sat_i: int, t: float | None = None) -> np.ndarray:
-        t_use = self.t if t is None else t
+        t_use = self.t if t is None else float(t)
+        key = (int(sat_i), self._time_key(t))
+        hit = self._eci_cache.get(key)
+        if hit is not None:
+            return hit
         a, e, inc, raan, argp, m0 = self.elements[sat_i]
         r, _ = geo.rv_at_time(
             a, e, inc, raan, argp, m0, t_use, 0.0, mean_motion=float(self.mean_motions[sat_i])
         )
+        self._eci_cache[key] = r
         return r
 
     def r_ecef(self, sat_i: int, t: float | None = None) -> np.ndarray:
-        t_use = self.t if t is None else t
-        return geo.eci_to_ecef(self.r_eci(sat_i, t_use), t_use, self.gmst0)
+        t_use = self.t if t is None else float(t)
+        key = (int(sat_i), self._time_key(t))
+        hit = self._ecef_cache.get(key)
+        if hit is not None:
+            return hit
+        r = geo.eci_to_ecef(self.r_eci(sat_i, t_use), t_use, self.gmst0)
+        self._ecef_cache[key] = r
+        return r
 
     def lla(self, sat_i: int, t: float | None = None) -> tuple[float, float, float]:
         return geo.ecef_to_lla(self.r_ecef(sat_i, t))
@@ -269,6 +314,8 @@ class KeplerWorld:
         self.t += float(dt)
         self._access_cache.clear()
         self._sun_cache.clear()
+        self._eci_cache.clear()
+        self._ecef_cache.clear()
 
 
 def _ll(point) -> tuple[float, float] | None:

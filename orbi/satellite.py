@@ -161,17 +161,25 @@ def _is_addressed(job: dict) -> bool:
 
 def job_visible(world, sat_index: int, job: dict) -> bool:
     """True when this satellite meets the job's visibility or address condition."""
+    cache = getattr(world, "_visible_cache", None)
+    job_id = job.get("id")
+    key = (int(sat_index), job_id)
+    if isinstance(cache, dict) and job_id is not None and key in cache:
+        return cache[key]
+
     if _is_addressed(job):
-        return int(sat_index) == int(job["addressed"])
+        seen = int(sat_index) == int(job["addressed"])
+    else:
+        points = job_points(job)
+        if not points:
+            seen = False
+        elif len(points) == 1:
+            seen = bool(world.sees_job(sat_index, points[0], points[0]))
+        elif len(points) == 2:
+            seen = bool(world.sees_job(sat_index, points[0], points[1]))
+        else:
+            seen = all(world.sees_job(sat_index, point, point) for point in points)
 
-    points = job_points(job)
-
-    if not points:
-        return False
-
-    if len(points) == 1:
-        return bool(world.sees_job(sat_index, points[0], points[0]))
-
-    if len(points) == 2:
-        return bool(world.sees_job(sat_index, points[0], points[1]))
-    return all(world.sees_job(sat_index, point, point) for point in points)
+    if isinstance(cache, dict) and job_id is not None:
+        cache[key] = seen
+    return seen

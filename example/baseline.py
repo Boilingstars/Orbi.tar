@@ -14,10 +14,10 @@ import numpy as np
 
 from example.agent import GreedyAgent, PPOAgent, RandomAgent
 from orbi.env import EventConfig, OpsEnv, load, resolve_scenario
-from tools.evaluating import Eval, load_ppo, run_episode, shift_metrics
+from tools.evaluating import Eval, load_ppo, run_episode, shift_kwargs, shift_metrics
 
 
-SCENARIO = "p02"
+SCENARIO = "p03"
 
 AGENTS = [
     (GreedyAgent, None),
@@ -58,10 +58,9 @@ def main() -> None:
     env = OpsEnv(
         scenario=spec,
         events=events,
-        top_k=settings.top_k,
         seed=settings.seed,
-        ground_points=settings.ground_points,
-        job_difficulty=settings.job_difficulty,
+        scripted_events=list(settings.scripted_events or []),
+        **shift_kwargs(settings),
     )
     report = []
 

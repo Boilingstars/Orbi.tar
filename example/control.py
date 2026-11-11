@@ -37,22 +37,24 @@ class GroundControl:
         return self._view(env, job)["n_visible"] > 0
 
     def _executable(self, env, job: dict) -> int:
-        """How many eligible satellites can take the job on this tick. Cached for the sort."""
-        step = int(env.k)
-        cache = getattr(self, "_executable_cache", None)
-        if cache is None or cache[0] != step:
-            cache = (step, {})
-            self._executable_cache = cache
-        stored = cache[1].get(job["id"])
-        if stored is not None:
-            return stored
+        """How many eligible satellites can take the job on this tick.
 
-        action = {"action": "job", "job_id": job["id"]}
+        A dict on the env is the snapshot `collect` is building. The count is
+        not stored on the controller, so the next shift cannot reuse it.
+        """
+        cache = getattr(env, "_executable_cache", None)
+        job_id = job["id"]
+        if isinstance(cache, dict) and job_id in cache:
+            return cache[job_id]
+
+        action = {"action": "job", "job_id": job_id}
         count = 0
         for sid in self._eligible(env, job):
             ok, _reason, _power = env.can_execute(sid, action)
             count += int(ok)
-        cache[1][job["id"]] = count
+
+        if isinstance(cache, dict):
+            cache[job_id] = count
         return count
 
     def job_rank(self, env, job: dict) -> tuple:

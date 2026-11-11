@@ -307,6 +307,19 @@ class OpsEnv(gym.Env):
             "events_outage": 0.0,
             "events_skipped": 0.0,
             "reward_total": 0.0,
+            "cal_while_valid": 0.0,
+            "cal_with_job": 0.0,
+            "cal_without_job": 0.0,
+            "cal_soon": 0.0,
+            "cal_age_sum": 0.0,
+            "cal_count": 0.0,
+        }
+        self._queue = {
+            "ticks": 0.0,
+            "feasible_edges": 0.0,
+            "executable_jobs": 0.0,
+            "executors": 0.0,
+            "outside_slots": 0.0,
         }
         self._deliver_events()
         return self._observe(), {"step": 0}
@@ -318,6 +331,19 @@ class OpsEnv(gym.Env):
         return self.sats[sid].available(self.k)
 
     def can_execute(self, sid: str, action: dict) -> tuple[bool, str, float]:
+        cache = getattr(self, "_execute_cache", None)
+        key = (sid, action.get("action"), action.get("job_id"))
+
+        if isinstance(cache, dict) and key in cache:
+            return cache[key]
+
+        result = self._can_execute(sid, action)
+
+        if isinstance(cache, dict):
+            cache[key] = result
+        return result
+
+    def _can_execute(self, sid: str, action: dict) -> tuple[bool, str, float]:
         sat = self.sats.get(sid)
         if sat is None:
             return False, "unknown_satellite", 0.0
@@ -365,6 +391,12 @@ class OpsEnv(gym.Env):
         self.ops_stats["act_job"] += stats["job"]
         self.ops_stats["conflicts_repaired"] += stats["conflicts"]
         self.ops_stats["downlink_slots_used"] += stats["downlinks"]
+        self.ops_stats["cal_while_valid"] += stats["cal_while_valid"]
+        self.ops_stats["cal_with_job"] += stats["cal_with_job"]
+        self.ops_stats["cal_without_job"] += stats["cal_without_job"]
+        self.ops_stats["cal_soon"] += stats["cal_soon"]
+        self.ops_stats["cal_age_sum"] += stats["cal_age_sum"]
+        self.ops_stats["cal_count"] += stats["cal_count"]
         self.ops_stats["reward_total"] += reward
         # Events keep arriving until the shift or the step cap ends.
         terminated = self.k >= self.steps_total
@@ -640,10 +672,32 @@ class OpsEnv(gym.Env):
 
         # Fresh calibration is the part of the window before calibrate_free_at.
         early = 0
+        while_valid = with_job = without_job = soon = n_cal = 0
+        age_sum = 0
         valid = max(self.calibration_valid, 1)
+        quarter = max(valid // 4, 1)
+        free_at = self.reward.calibrate_free_at
         for i, (kind, _) in enumerate(decoded):
-            if kind == "calibrate" and self.sats[self.sat_ids[i]].calibration_age_steps / valid < self.reward.calibrate_free_at:
+            if kind != "calibrate":
+                continue
+
+            n_cal += 1
+            age = int(self.sats[self.sat_ids[i]].calibration_age_steps)
+            age_sum += age
+
+            if age / valid < free_at:
                 early += 1
+
+            if age < self.calibration_valid:
+                while_valid += 1
+
+            if self._mask[i, : self.K].any():
+                with_job += 1
+            else:
+                without_job += 1
+
+            if age < quarter:
+                soon += 1
         return commands, {
             "idle": float(counts["idle"]),
             "calibrate": float(counts["calibrate"]),
@@ -651,6 +705,12 @@ class OpsEnv(gym.Env):
             "conflicts": float(conflicts),
             "early_calibrations": float(early),
             "downlinks": float(len(downlinks)),
+            "cal_while_valid": float(while_valid),
+            "cal_with_job": float(with_job),
+            "cal_without_job": float(without_job),
+            "cal_soon": float(soon),
+            "cal_age_sum": float(age_sum),
+            "cal_count": float(n_cal),
         }
 
     def _slot_by_id(self) -> dict[str, int]:
@@ -720,6 +780,29 @@ class OpsEnv(gym.Env):
         out["idle_share"] = self.ops_stats["act_idle"] / total
         out["calibrate_share"] = self.ops_stats["act_calibrate"] / total
         out["job_share"] = self.ops_stats["act_job"] / total
+        n_cal = self.ops_stats["cal_count"]
+        out["cal_age_mean"] = self.ops_stats["cal_age_sum"] / n_cal if n_cal else 0.0
+
+        # Means over the ticks that built an observation. Executors are per executable job.
+        ticks = self._queue["ticks"]
+        out["feasible_edges"] = self._queue["feasible_edges"] / ticks if ticks else 0.0
+        out["executable_jobs"] = self._queue["executable_jobs"] / ticks if ticks else 0.0
+        out["executable_outside_slots"] = self._queue["outside_slots"] / ticks if ticks else 0.0
+        job_ticks = self._queue["executable_jobs"]
+        out["executors_per_job"] = self._queue["executors"] / job_ticks if job_ticks else 0.0
+
+        finished = [job for job in self.jobs.values() if job["completed_step"] is not None]
+        revenue = sum(float(job.get("value_usd", 0.0)) for job in finished)
+        used = self.ops_stats["downlink_slots_used"]
+        out["revenue_per_downlink_tick"] = revenue / used if used else 0.0
+        for kind in ("relay", "downlink"):
+            group = [job for job in finished if job.get("kind") == kind]
+            out[f"done_{kind}"] = float(len(group))
+            out[f"revenue_{kind}"] = float(sum(float(job.get("value_usd", 0.0)) for job in group))
+        for priority in (1, 2, 3):
+            group = [job for job in finished if int(job.get("priority", 1)) == priority]
+            out[f"done_p{priority}"] = float(len(group))
+            out[f"revenue_p{priority}"] = float(sum(float(job.get("value_usd", 0.0)) for job in group))
         return out
 
     def summary(self) -> dict:
