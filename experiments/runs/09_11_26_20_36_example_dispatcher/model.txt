@@ -1,1 +1,0 @@
-/root/Orbi.tar/experiments/runs/09_11_26_20_36_example_dispatcher/model.zip
