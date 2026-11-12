@@ -53,6 +53,70 @@ def work_span_ticks(env) -> float:
     return float(max(3 * zone_dwell_ticks(env), 1))
 
 
+def _first_downlink_window(env, rng, points, work: int, from_step: int) -> tuple[int, int] | None:
+    """One contiguous pass long enough for `work` ticks, or the longest shorter pass."""
+    if not points or work < 1:
+        return None
+
+    world = env.world
+    dt = max(float(env.dt), 1.0)
+    t_now = float(world.t)
+    t_from = t_now + (int(from_step) - int(env.k)) * dt
+    t_limit = t_now + (int(env.steps_total) - int(env.k)) * dt
+    sats = np.arange(env.n_sats)
+    rng.shuffle(sats)
+
+    best: tuple[int, int] | None = None
+    best_ticks = 0
+    for sat_i in sats:
+        t = t_from
+        for _ in range(8):
+            if t > t_limit + 1e-9:
+                break
+            ticks, nxt = world.access_run_ticks(int(sat_i), points, t, step_s=dt)
+            if ticks > 0:
+                start = int(from_step) + int(round((t - t_from) / dt))
+                end = min(int(env.steps_total), start + ticks)
+                run = end - start
+                if run >= work:
+                    return start, end
+                if run > best_ticks:
+                    best_ticks = run
+                    best = (start, end)
+
+                # The next orbit is a different window. Do not stitch this run to it.
+                remaining, _nxt = world.access_windows(int(sat_i), points, t, step_s=dt)
+                t = t + max(float(remaining), dt) + dt
+                continue
+
+            if nxt <= 0:
+                break
+            t = t + float(nxt)
+    return best
+
+
+def _bind_downlink_window(env, rng, job: dict, from_step: int) -> dict | None:
+    """Pin a downlink to one pass where some satellite can finish it without a gap."""
+    points = job_points(job)
+    work = max(int(job["work_steps"]), 1)
+    window = _first_downlink_window(env, rng, points, work, from_step)
+    if window is None:
+        return None
+
+    start, end = window
+    ticks = end - start
+    if ticks < 1:
+        return None
+
+    # A 2–3 pass draw cannot fit in one access. Shrink the work to this pass.
+    if ticks < work:
+        job["work_steps"] = ticks
+        job["remaining_steps"] = ticks
+    job["release_step"] = int(start)
+    job["deadline_step"] = int(end)
+    return job
+
+
 def _deadline_on_window(env, job: dict, extra_passes: int) -> int:
     """Deadline after N zone-passes worth of wait. Avoids a Kepler scan of the whole fleet."""
     dwell = zone_dwell_ticks(env)
@@ -131,6 +195,10 @@ class _Usd:
         # Initial batch is known from tick 0. Deadline is the end of the N-th zone window.
         if release is None:
             job["release_step"] = 0
+
+        if job["kind"] == "downlink":
+            return _bind_downlink_window(env, rng, job, from_step=int(job["release_step"]))
+
         extra = int(round(getattr(self.slack, "passes", 0.0)))
         end = _deadline_on_window(env, job, extra)
         job["deadline_step"] = min(int(env.steps_total), max(int(job["release_step"]) + int(job["work_steps"]), end))
@@ -273,11 +341,34 @@ class _ShiftJobs(JobCatalog):
         cap = int(getattr(getattr(env, "events_cfg", None), "pool_max", 0) or 0)
         if cap > 0:
             target = min(target, cap)
-        return super().sample_initial(rng, env, target)
+
+        # A downlink with no one-pass window is dropped. Retry so the pool stays full.
+        jobs: dict[str, dict] = {}
+        i = 0
+        attempts = 0
+        limit = max(target * 12, target)
+        while len(jobs) < target and attempts < limit:
+            attempts += 1
+            job_id = f"J{i:03d}"
+            i += 1
+            job = self.pick(rng).sample(rng, env, job_id, release=None)
+            if job is not None:
+                jobs[job_id] = job
+        return jobs
 
     def sample_added(self, rng, env, k: int, count: int, ident) -> list[dict]:
         self._apply_downlink_slots(env)
-        return super().sample_added(rng, env, k, count, ident)
+        jobs = []
+        i = 0
+        attempts = 0
+        limit = max(int(count) * 12, int(count))
+        while len(jobs) < count and attempts < limit:
+            attempts += 1
+            job = self.pick(rng).sample(rng, env, f"{ident}-J{i}", release=k)
+            i += 1
+            if job is not None:
+                jobs.append(job)
+        return jobs
 
 
 def catalog() -> JobCatalog:

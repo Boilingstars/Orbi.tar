@@ -120,6 +120,10 @@ class Satellite:
         if not job["release_step"] <= k < job["deadline_step"]:
             return False, "outside_job_window"
 
+        # A downlink has one pass. Starting it without enough ticks left cannot finish.
+        if job.get("kind") == "downlink" and int(job["remaining_steps"]) > int(job["deadline_step"]) - k:
+            return False, "window_too_short"
+
         if self.calibration_age_steps >= model["calibration_valid_steps"]:
             return False, "calibration_required"
 

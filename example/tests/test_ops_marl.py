@@ -24,7 +24,7 @@ def _all_idle(env: OpsEnv) -> np.ndarray:
     return np.full(env.N, env.idle_index, dtype=np.int64)
 
 
-def _inject_relay(env: OpsEnv, sats: list[str], job_id: str = "RL-0") -> str:
+def _inject_job(env: OpsEnv, sats: list[str], job_id: str, kind: str, work: int = 2, life: int = 6) -> str:
     k = env.k
     for sid in sats:
         env.sats[sid].calibration_age_steps = 0
@@ -36,10 +36,10 @@ def _inject_relay(env: OpsEnv, sats: list[str], job_id: str = "RL-0") -> str:
             "jobs": [
                 {
                     "id": job_id,
-                    "kind": "relay",
+                    "kind": kind,
                     "release_step": k,
-                    "deadline_step": k + 3,
-                    "work_steps": 2,
+                    "deadline_step": k + life,
+                    "work_steps": work,
                     "eligible_satellites": list(sats),
                     "priority": 3,
                     "value_usd": 10.0,
@@ -51,6 +51,14 @@ def _inject_relay(env: OpsEnv, sats: list[str], job_id: str = "RL-0") -> str:
     )
     env._observe()
     return job_id
+
+
+def _inject_relay(env: OpsEnv, sats: list[str], job_id: str = "RL-0") -> str:
+    return _inject_job(env, sats, job_id, kind="relay", work=2, life=3)
+
+
+def _inject_downlink(env: OpsEnv, sats: list[str], job_id: str = "DL-0", work: int = 3, life: int = 8) -> str:
+    return _inject_job(env, sats, job_id, kind="downlink", work=work, life=life)
 
 
 def test_baseline_repair_off_leaves_duplicate_to_environment():
@@ -100,6 +108,79 @@ def test_abandon_job_for_calibrate_keeps_progress():
     assert job["remaining_steps"] == remaining - 1
     env._advance({second: {"action": "job", "job_id": job_id}})
     assert job["remaining_steps"] == remaining - 2
+
+
+def test_downlink_idle_or_calibrate_resets_progress():
+    env = _env()
+    env.reset(seed=0)
+    first = env.sat_ids[0]
+    job_id = _inject_downlink(env, [first], "DL-pause")
+    job = env.jobs[job_id]
+    work = job["work_steps"]
+    env._advance({first: {"action": "job", "job_id": job_id}})
+    assert job["remaining_steps"] == work - 1
+    env._advance({first: {"action": "idle"}})
+    assert job["remaining_steps"] == work
+    assert job["interruptions"] == 1
+
+    env._advance({first: {"action": "job", "job_id": job_id}})
+    env._advance({first: {"action": "calibrate"}})
+    assert job["remaining_steps"] == work
+    assert env.ops_stats["downlink_resets"] == 2.0
+
+
+def test_downlink_switch_resets_before_the_new_tick():
+    env = _env()
+    env.reset(seed=0)
+    first, second = env.sat_ids[:2]
+    job_id = _inject_downlink(env, [first, second], "DL-switch")
+    job = env.jobs[job_id]
+    work = job["work_steps"]
+    env._advance({first: {"action": "job", "job_id": job_id}})
+    assert job["remaining_steps"] == work - 1
+    env._advance({second: {"action": "job", "job_id": job_id}})
+    assert job["remaining_steps"] == work - 1
+    assert job["interruptions"] == 1
+
+
+def test_downlink_lost_view_resets_and_can_restart_in_the_window():
+    env = _env()
+    env.reset(seed=0)
+    first = env.sat_ids[0]
+    job_id = _inject_downlink(env, [first], "DL-view", work=3, life=8)
+    job = env.jobs[job_id]
+    work = job["work_steps"]
+    env._advance({first: {"action": "job", "job_id": job_id}})
+    env.world.sees_job = lambda *args, **kwargs: False
+    env._advance({first: {"action": "job", "job_id": job_id}})
+    assert job["remaining_steps"] == work
+    env.world.sees_job = lambda *args, **kwargs: True
+    env._advance({first: {"action": "job", "job_id": job_id}})
+    assert job["remaining_steps"] == work - 1
+
+
+def test_downlink_cannot_continue_after_the_window():
+    env = _env()
+    env.reset(seed=0)
+    first = env.sat_ids[0]
+    job_id = _inject_downlink(env, [first], "DL-window", work=2, life=3)
+    env._advance({first: {"action": "job", "job_id": job_id}})
+    env._advance({first: {"action": "idle"}})
+    env._advance({first: {"action": "idle"}})
+    env.world.sees_job = lambda *args, **kwargs: True
+    ok, reason, _ = env.can_execute(first, {"action": "job", "job_id": job_id})
+    assert not ok
+    assert reason == "outside_job_window"
+
+
+def test_downlink_too_short_to_finish_is_masked():
+    env = _env()
+    env.reset(seed=0)
+    first = env.sat_ids[0]
+    job_id = _inject_downlink(env, [first], "DL-short", work=4, life=2)
+    ok, reason, _ = env.can_execute(first, {"action": "job", "job_id": job_id})
+    assert not ok
+    assert reason == "window_too_short"
 
 
 def test_neighbor_methods_and_padding():

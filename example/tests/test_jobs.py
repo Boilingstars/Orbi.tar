@@ -16,6 +16,7 @@ from example.jobs import (
 )
 from example.plots import run_label
 from orbi.env import EventConfig, OpsEnv
+from orbi.satellite import job_points
 
 
 def test_catalog_is_every_concrete_subclass():
@@ -76,6 +77,21 @@ def test_work_mix_follows_zone_dwell():
     short = sum(1 for work in works if work <= ref + 1)
     assert short / max(len(works), 1) >= 0.65
     assert max(works) <= 3 * dwell + 1
+
+
+def test_downlink_jobs_fit_one_pass():
+    env = OpsEnv(scenario="p01", events=EventConfig.off(), seed=1)
+    env.reset(seed=1)
+    downlinks = [job for job in env.jobs.values() if job["kind"] == "downlink"]
+    assert downlinks
+    dt = float(env.dt)
+    for job in downlinks:
+        life = int(job["deadline_step"]) - int(job["release_step"])
+        assert life >= int(job["work_steps"]) >= 1
+        points = job_points(job)
+        t = float(env.world.t) + (int(job["release_step"]) - int(env.k)) * dt
+        ticks = max(env.world.access_run_ticks(i, points, t, step_s=dt)[0] for i in range(env.n_sats))
+        assert ticks >= int(job["work_steps"])
 
 
 def test_short_jobs_live_until_a_window():

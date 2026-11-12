@@ -294,6 +294,7 @@ class OpsEnv(gym.Env):
         self.trace = []
         self._commands = []
         self._last_executor = {}
+        self._downlink_holder = {}
         self._event_counter = 0
         self.jobs = self._sample_jobs(int(self.cfg.get("jobs", {}).get("initial", max(8, self.n_sats))))
         self.ops_stats = {
@@ -313,6 +314,10 @@ class OpsEnv(gym.Env):
             "cal_soon": 0.0,
             "cal_age_sum": 0.0,
             "cal_count": 0.0,
+            "downlink_resets": 0.0,
+            "downlink_lost_ticks": 0.0,
+            "downlink_lost_usd": 0.0,
+            "downlink_work_ticks": 0.0,
         }
         self._queue = {
             "ticks": 0.0,
@@ -322,6 +327,9 @@ class OpsEnv(gym.Env):
             "outside_slots": 0.0,
         }
         self._deliver_events()
+        reset_phi = getattr(self.reward, "reset_potential", None)
+        if reset_phi is not None:
+            reset_phi(self)
         return self._observe(), {"step": 0}
 
     def action_masks(self) -> np.ndarray:
@@ -413,6 +421,18 @@ class OpsEnv(gym.Env):
         used: set[str] = set()
         downlinks = 0
         rows = []
+
+        # Unfinished downlink progress, before this tick mutates remaining_steps.
+        in_progress = {
+            job["id"]
+            for job in self.jobs.values()
+            if job.get("kind") == "downlink"
+            and job["completed_step"] is None
+            and 0 < int(job["remaining_steps"]) < int(job["work_steps"])
+        }
+        prev_holder = dict(self._downlink_holder)
+        worked: dict[str, str] = {}
+
         for sat in self.fleet:
             requested = commands.get(sat.sat_id, {"action": "idle"})
             ok, reason, power = self.can_execute(sat.sat_id, requested)
@@ -441,6 +461,14 @@ class OpsEnv(gym.Env):
             if ok and actual == "job" and job is not None:
                 used.add(job["id"])
                 downlinks += int(job["kind"] == "downlink")
+
+                # A new satellite starts the downlink from zero, then this tick counts.
+                if job["kind"] == "downlink":
+                    if job["id"] in in_progress and prev_holder.get(job["id"]) != sat.sat_id:
+                        self._reset_downlink(job)
+                    self.ops_stats["downlink_work_ticks"] += 1.0
+                    worked[job["id"]] = sat.sat_id
+
                 job["remaining_steps"] -= 1
                 if job["remaining_steps"] == 0:
                     job["completed_step"] = self.k + 1
@@ -465,11 +493,39 @@ class OpsEnv(gym.Env):
                     "below_reserve": sat.energy_wh < sat.capacity_wh * self.reserve_pct / 100.0 - 1e-9,
                 }
             )
+
+        # Idle, calibrate, a blocked command, or lost view drops unfinished downlink work.
+        for job_id in in_progress:
+            if job_id in worked:
+                continue
+            job = self.jobs.get(job_id)
+            if job is None or job["completed_step"] is not None:
+                continue
+            self._reset_downlink(job)
+
+        self._downlink_holder = {
+            job_id: sid
+            for job_id, sid in worked.items()
+            if self.jobs[job_id].get("kind") == "downlink" and self.jobs[job_id]["completed_step"] is None
+        }
+
         # The constellation moves after every satellite has been updated.
         self.world.step(self.dt)
         self.trace.extend(rows)
         self.k += 1
         return rows
+
+    def _reset_downlink(self, job: dict) -> None:
+        """Drop unfinished downlink progress. The job stays open until its window ends."""
+        work = max(int(job["work_steps"]), 1)
+        lost = work - int(job["remaining_steps"])
+        job["remaining_steps"] = work
+        job["interruptions"] = int(job.get("interruptions", 0)) + 1
+        if lost <= 0:
+            return
+        self.ops_stats["downlink_resets"] += 1.0
+        self.ops_stats["downlink_lost_ticks"] += float(lost)
+        self.ops_stats["downlink_lost_usd"] += float(job.get("value_usd", 0.0)) * lost / work
 
     def _pick_active_points(self) -> np.ndarray:
         # A named region is already ordered from its centre. The first m rows are the local group.
@@ -546,7 +602,7 @@ class OpsEnv(gym.Env):
             for job in self.jobs.values()
             if job["completed_step"] is None
             and job["remaining_steps"] > 0
-            and job["release_step"] <= k < job["deadline_step"]
+            and job["deadline_step"] > k
         )
 
     def _emit_add_jobs(self, k: int) -> None:
@@ -799,10 +855,30 @@ class OpsEnv(gym.Env):
             group = [job for job in finished if job.get("kind") == kind]
             out[f"done_{kind}"] = float(len(group))
             out[f"revenue_{kind}"] = float(sum(float(job.get("value_usd", 0.0)) for job in group))
+            out[f"mean_value_{kind}"] = out[f"revenue_{kind}"] / len(group) if group else 0.0
         for priority in (1, 2, 3):
             group = [job for job in finished if int(job.get("priority", 1)) == priority]
             out[f"done_p{priority}"] = float(len(group))
             out[f"revenue_p{priority}"] = float(sum(float(job.get("value_usd", 0.0)) for job in group))
+
+        downlinks = [job for job in finished if job.get("kind") == "downlink"]
+        spent = self.ops_stats["downlink_work_ticks"]
+        productive = float(sum(int(job["work_steps"]) for job in downlinks))
+        first = sum(1 for job in downlinks if int(job.get("interruptions", 0)) == 0)
+        due = [job for job in self.jobs.values() if job["deadline_step"] <= self.k]
+        critical = [job for job in due if int(job.get("priority", 1)) == 3]
+        out["downlink_resets"] = self.ops_stats["downlink_resets"]
+        out["downlink_lost_ticks"] = self.ops_stats["downlink_lost_ticks"]
+        out["downlink_lost_usd"] = self.ops_stats["downlink_lost_usd"]
+        out["downlink_work_ticks"] = spent
+        out["downlink_first_try_share"] = first / len(downlinks) if downlinks else 0.0
+        out["downlink_tick_yield"] = productive / spent if spent else 0.0
+        dl_rev = out["revenue_downlink"]
+        out["revenue_per_occupied_downlink_tick"] = dl_rev / spent if spent else 0.0
+        out["revenue_per_productive_downlink_tick"] = dl_rev / productive if productive else 0.0
+        out["p3_rate"] = (
+            sum(job["completed_step"] is not None for job in critical) / len(critical) if critical else 0.0
+        )
         return out
 
     def summary(self) -> dict:

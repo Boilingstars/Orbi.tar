@@ -228,6 +228,10 @@ def test_calibration_counters_record_a_fresh_calibrate():
     assert metrics["feasible_edges"] > 0.0
     assert "revenue_per_downlink_tick" in metrics
     assert "executable_outside_slots" in metrics
+    assert "downlink_resets" in metrics
+    assert "downlink_tick_yield" in metrics
+    assert "p3_rate" in metrics
+    assert "mean_value_downlink" in metrics
 
 
 def test_mask_matches_can_execute_on_packed_slots():

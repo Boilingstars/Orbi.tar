@@ -152,7 +152,27 @@ _SUMMARY = (
     ("min_soc_pct", "minimum_soc_pct"),
     ("blocked_commands", "blocked_command_count"),
 )
-_OPS = ("idle_share", "calibrate_share", "job_share", "executor_switches", "conflicts_repaired")
+_OPS = (
+    "idle_share",
+    "calibrate_share",
+    "job_share",
+    "executor_switches",
+    "conflicts_repaired",
+    "done_relay",
+    "done_downlink",
+    "revenue_relay",
+    "revenue_downlink",
+    "mean_value_relay",
+    "mean_value_downlink",
+    "downlink_resets",
+    "downlink_lost_ticks",
+    "downlink_lost_usd",
+    "downlink_first_try_share",
+    "downlink_tick_yield",
+    "revenue_per_occupied_downlink_tick",
+    "revenue_per_productive_downlink_tick",
+    "p3_rate",
+)
 
 
 def shift_metrics(rows: list[dict]) -> dict:

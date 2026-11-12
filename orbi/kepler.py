@@ -265,6 +265,21 @@ class KeplerWorld:
 
         return self._stored(self._access_cache, key, 4096, compute)
 
+    def access_run_ticks(self, sat_i: int, points, t_query: float | None = None, step_s: float = 300.0) -> tuple[int, float]:
+        """Ticks left in this contiguous pass, or seconds until the next rise.
+
+        One pass is one run of joint visibility. A later orbit is a different
+        window: the caller must skip past this run instead of stitching them.
+        """
+        remaining, nxt = self.access_windows(sat_i, points, t_query, step_s=step_s)
+        dt = max(float(step_s), 1.0)
+        if remaining <= 0.0:
+            return 0, float(nxt)
+
+        if remaining < dt:
+            return 1, 0.0
+        return int(remaining / dt) + 1, 0.0
+
     def access_end(self, sat_i: int, points, t_query: float | None = None, skip_passes: int = 0, step_s: float = 300.0) -> float:
         """Absolute time when the (skip_passes+1)-th joint access ends. 0 if none."""
         t_use = self.t if t_query is None else float(t_query)

@@ -81,6 +81,17 @@ _OPS_KEYS = {
     "executable_jobs": "ops/executable_jobs",
     "executors_per_job": "ops/executors_per_job",
     "executable_outside_slots": "ops/executable_outside_slots",
+    "downlink_resets": "ops/downlink_resets",
+    "downlink_lost_ticks": "ops/downlink_lost_ticks",
+    "downlink_lost_usd": "ops/downlink_lost_usd",
+    "downlink_work_ticks": "ops/downlink_work_ticks",
+    "downlink_first_try_share": "ops/downlink_first_try_share",
+    "downlink_tick_yield": "ops/downlink_tick_yield",
+    "revenue_per_occupied_downlink_tick": "ops/revenue_per_occupied_downlink_tick",
+    "revenue_per_productive_downlink_tick": "ops/revenue_per_productive_downlink_tick",
+    "mean_value_relay": "ops/mean_value_relay",
+    "mean_value_downlink": "ops/mean_value_downlink",
+    "p3_rate": "ops/p3_rate",
 }
 
 
