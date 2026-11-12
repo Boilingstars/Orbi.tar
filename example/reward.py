@@ -1,77 +1,60 @@
 """Reward for this package.
 
-A job pays a slice of worth on every executed tick and the rest when it
-finishes. Worth is dollars plus a priority bonus, without scaling by length:
-a short job is cheaper to finish, not three times more valuable. An untouched
-deadline costs a fraction of worth only if the job was packed or P3; the
-unscheduled pool tail is free. Started-then-dropped work pays the unfinished
-slice immediately.
+A finished job pays its dollar price and nothing else. A share is spread
+across the ticks that actually execute it, and the rest is paid when it
+completes. Taking a job, missing a deadline, switching executor, calibrating,
+and sitting below reserve do not move the return. Priority is not added on
+top of the price: the return matches revenue.
+
+`job_worth` still adds the priority bonus. The observation and the slot
+ranker read that, so a loaded policy keeps the same inputs.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from example.jobs import PRICE_DIV, work_ref_ticks
+from example.jobs import PRICE_DIV
 from tools.reward import Reward
 
 
-# Untouched deadline: enough that ignoring the queue is visible next to dollars.
-_UNTOUCHED_MISS = 0.40
-
-# 80% work bin in ticks. Tick credit uses the job's own length; this is the unit.
-_WORK_REF = work_ref_ticks
-
-# Same divisor as job USD, so P3 bonus and calibrate stay next to dollars.
+# Same divisor as job USD. The observation clips worth against this scale.
 _PRIORITY_BONUS = (0.0, 25.0 / PRICE_DIV, 80.0 / PRICE_DIV)
 
 
 def job_worth(job: dict, priority_bonus: tuple[float, float, float] = _PRIORITY_BONUS) -> float:
-    """Dollars plus priority. Length is not a multiplier."""
+    """Dollars plus priority, for the observation and the ranker. Not the return."""
     rank = min(max(int(job.get("priority", 1)) - 1, 0), len(priority_bonus) - 1)
     return float(job.get("value_usd", 0.0)) + float(priority_bonus[rank])
 
 
 @dataclass
 class MyReward(Reward):
-    """Tick slice of worth, remainder on finish, unfinished slice on an abandon."""
+    """Dollar price of executed work. No penalties and no priority bonus."""
 
     progress: float = 0.0
-    executor_switch: float = 0.25
-    priority_bonus: tuple[float, float, float] = _PRIORITY_BONUS
-    advance: float = 0.0
+    below_reserve: float = 0.0
+    brownout: float = 0.0
+    blocked: float = 0.0
+    executor_switch: float = 0.0
+    conflict: float = 0.0
+    early_calibrate: float = 0.0
     tick_share: float = 0.25
-    early_calibrate: float = 4.0 / PRICE_DIV
-    below_reserve: float = 1.0
 
     def worth(self, job: dict) -> float:
-        return job_worth(job, self.priority_bonus)
+        return float(job.get("value_usd", 0.0))
 
     def on_complete(self, job: dict) -> float:
         return (1.0 - self.tick_share) * self.worth(job)
 
     def on_miss(self, job: dict) -> float:
-        worth = self.worth(job)
-        started = int(job["remaining_steps"]) < int(job["work_steps"])
-        if started:
-            leftover = job["remaining_steps"] / max(float(job["work_steps"]), 1.0)
-            return -leftover * worth
-        # Jammed pool tail was never shown. Only packed, started, or P3 misses count.
-        if int(job.get("priority", 1)) == 3 or job.get("ever_packed"):
-            return -_UNTOUCHED_MISS * worth
         return 0.0
 
     def score(self, env, rows, prev_executor, stats):
         reward = super().score(env, rows, prev_executor, stats)
-        mask = getattr(env, "_mask", None)
-        executable = bool(mask is not None and getattr(env, "K", 0) and mask[:, : env.K].any())
 
-        # Early calibrate in idle is free; with a legal job it must show next to dollars.
-        if not executable:
-            reward += self.early_calibrate * float(stats.get("early_calibrations", 0.0))
-
+        # One slice per job that ran this tick. A second satellite on the same job does not pay twice.
         paid: set[str] = set()
-        work_ref = max(float(_WORK_REF(env)), 1.0)
         for row in rows:
             if row["executed"] != "job":
                 continue
@@ -80,7 +63,8 @@ class MyReward(Reward):
             if job_id in paid:
                 continue
 
-            job = env.jobs[job_id]
             paid.add(job_id)
-            reward += self.tick_share * self.worth(job) / max(float(job["work_steps"]), work_ref)
+            job = env.jobs[job_id]
+            steps = max(float(job["work_steps"]), 1.0)
+            reward += self.tick_share * self.worth(job) / steps
         return reward

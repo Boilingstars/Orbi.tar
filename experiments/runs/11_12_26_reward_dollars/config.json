@@ -1,6 +1,6 @@
 {
   "scenario": "/root/Orbi.tar/example/scenarios/P03_energy.json",
-  "timesteps": 16384,
+  "timesteps": 120000,
   "n_envs": 8,
   "top_k": 64,
   "seed": 0,
@@ -17,8 +17,8 @@
   "tensorboard": false,
   "subproc": true,
   "load": "/root/Orbi.tar/experiments/runs/10_11_26_19_01_example_dispatcher/checkpoints/ckpt_73728.zip",
-  "save": "/root/Orbi.tar/experiments/runs/11_11_26_ent_coef_0.002/model.zip",
-  "run_dir": "/root/Orbi.tar/experiments/runs/11_11_26_ent_coef_0.002",
+  "save": "/root/Orbi.tar/experiments/runs/11_12_26_reward_dollars/model.zip",
+  "run_dir": "/root/Orbi.tar/experiments/runs/11_12_26_reward_dollars",
   "resume": false,
   "scenario_id": "P03_energy",
   "n_satellites": 48,
