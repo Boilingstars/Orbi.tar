@@ -1,0 +1,10 @@
+{
+  "saved_at": "2026-11-13T18:36:09.884764+00:00",
+  "checkpoint": "/root/Orbi.tar/experiments/runs/11_13_26_reward_pbrs_240k/checkpoints/ckpt_27648.zip",
+  "resume_latest": "/root/Orbi.tar/experiments/runs/11_13_26_reward_pbrs_240k/resume_latest.zip",
+  "sha256": "a2664c4067f16c709a698eca3068e522dac6b1cb3fa3a994e25c36d2e81d17c2",
+  "num_timesteps": 27648,
+  "n_updates": 104,
+  "progress_rows": 12,
+  "last_logged_timesteps": "27648"
+}

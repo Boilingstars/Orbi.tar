@@ -1,0 +1,428 @@
+{
+  "options": {
+    "scenario": "p03",
+    "model": "experiments/runs/11_12_26_reward_pbrs_360k/model.zip",
+    "fleet_sizes": [
+      16,
+      24,
+      32,
+      40,
+      48
+    ],
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "event_modes": [
+      "common"
+    ],
+    "rl_mode": "stochastic",
+    "rl_secondary": true,
+    "methods": [
+      "greedy",
+      "hungarian",
+      "rl"
+    ],
+    "output": "experiments/benchmarks",
+    "workers": 3,
+    "plots": true,
+    "smoke": true,
+    "max_steps": null,
+    "method_names": [
+      "Greedy",
+      "Hungarian",
+      "RL_stochastic",
+      "RL_deterministic"
+    ]
+  },
+  "scenario_id": "P03_energy",
+  "scenario_sha256": "4b0b09351cb6c8a0ee3a23e59f6d8b93cd4a558c325487856b36fb784550c5b8",
+  "constants": {
+    "N_MAX": 48,
+    "TOP_K": 64,
+    "SHIFT_STEPS": 288,
+    "STEP_S": 300,
+    "REFERENCE_SATS": 48,
+    "INITIAL_JOBS_PER_SAT": 5,
+    "BASE_POOL_MIN": 200,
+    "BASE_POOL_MAX": 350,
+    "BASE_ADDED_JOBS_MIN": 16,
+    "BASE_ADDED_JOBS_MAX": 28,
+    "BASE_OUTAGE_SATS": [
+      1,
+      3
+    ],
+    "HUNGARIAN_TIE_SOC": 0.0001,
+    "HUNGARIAN_TIE_HOLDER": 0.001,
+    "RL_POLICY_SEED": 7919,
+    "PRELIMINARY_SEEDS": 10,
+    "BOOTSTRAP_SAMPLES": 10000,
+    "BOOTSTRAP_SEED": 20261113
+  },
+  "shift_settings": {
+    "top_k": 64,
+    "baseline_repair": false,
+    "neighbor_method": "competitors",
+    "neighbor_memory": 12,
+    "ground_points": 64,
+    "ground_region": "world",
+    "job_difficulty": 0.15
+  },
+  "workload": {
+    "16": {
+      "n_sats": 16,
+      "initial_jobs": 80,
+      "pool_min": 67,
+      "pool_max": 117,
+      "add_min": 5,
+      "add_max": 9,
+      "downlink_limit": 2,
+      "outage_sats": [
+        1,
+        1
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    },
+    "24": {
+      "n_sats": 24,
+      "initial_jobs": 120,
+      "pool_min": 100,
+      "pool_max": 175,
+      "add_min": 8,
+      "add_max": 14,
+      "downlink_limit": 3,
+      "outage_sats": [
+        1,
+        2
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    },
+    "32": {
+      "n_sats": 32,
+      "initial_jobs": 160,
+      "pool_min": 133,
+      "pool_max": 233,
+      "add_min": 11,
+      "add_max": 19,
+      "downlink_limit": 4,
+      "outage_sats": [
+        1,
+        2
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    },
+    "40": {
+      "n_sats": 40,
+      "initial_jobs": 200,
+      "pool_min": 167,
+      "pool_max": 292,
+      "add_min": 13,
+      "add_max": 23,
+      "downlink_limit": 5,
+      "outage_sats": [
+        1,
+        3
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    },
+    "48": {
+      "n_sats": 48,
+      "initial_jobs": 240,
+      "pool_min": 200,
+      "pool_max": 350,
+      "add_min": 16,
+      "add_max": 28,
+      "downlink_limit": 6,
+      "outage_sats": [
+        1,
+        3
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    }
+  },
+  "fleets": {
+    "16": {
+      "satellites": [
+        "S01",
+        "S05",
+        "S07",
+        "S11",
+        "S14",
+        "S16",
+        "S17",
+        "S21",
+        "S23",
+        "S26",
+        "S28",
+        "S30",
+        "S33",
+        "S39",
+        "S43",
+        "S45"
+      ],
+      "plane_counts": [
+        3,
+        3,
+        3,
+        3,
+        2,
+        2
+      ]
+    },
+    "24": {
+      "satellites": [
+        "S01",
+        "S03",
+        "S05",
+        "S07",
+        "S09",
+        "S11",
+        "S14",
+        "S16",
+        "S17",
+        "S19",
+        "S21",
+        "S23",
+        "S26",
+        "S28",
+        "S30",
+        "S32",
+        "S33",
+        "S35",
+        "S37",
+        "S39",
+        "S41",
+        "S43",
+        "S45",
+        "S47"
+      ],
+      "plane_counts": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    "32": {
+      "satellites": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S07",
+        "S09",
+        "S10",
+        "S11",
+        "S12",
+        "S14",
+        "S16",
+        "S17",
+        "S18",
+        "S19",
+        "S21",
+        "S23",
+        "S25",
+        "S26",
+        "S28",
+        "S30",
+        "S32",
+        "S33",
+        "S34",
+        "S35",
+        "S37",
+        "S39",
+        "S41",
+        "S42",
+        "S43",
+        "S45",
+        "S47"
+      ],
+      "plane_counts": [
+        6,
+        6,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    "40": {
+      "satellites": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S09",
+        "S10",
+        "S11",
+        "S12",
+        "S13",
+        "S14",
+        "S16",
+        "S17",
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S23",
+        "S25",
+        "S26",
+        "S27",
+        "S28",
+        "S29",
+        "S30",
+        "S32",
+        "S33",
+        "S34",
+        "S35",
+        "S36",
+        "S37",
+        "S39",
+        "S41",
+        "S42",
+        "S43",
+        "S44",
+        "S45",
+        "S47"
+      ],
+      "plane_counts": [
+        7,
+        7,
+        7,
+        7,
+        6,
+        6
+      ]
+    },
+    "48": {
+      "satellites": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S12",
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S23",
+        "S24",
+        "S25",
+        "S26",
+        "S27",
+        "S28",
+        "S29",
+        "S30",
+        "S31",
+        "S32",
+        "S33",
+        "S34",
+        "S35",
+        "S36",
+        "S37",
+        "S38",
+        "S39",
+        "S40",
+        "S41",
+        "S42",
+        "S43",
+        "S44",
+        "S45",
+        "S46",
+        "S47",
+        "S48"
+      ],
+      "plane_counts": [
+        8,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    }
+  },
+  "model": {
+    "path": "/root/Orbi.tar/experiments/runs/11_12_26_reward_pbrs_360k/model.zip",
+    "sha256": "90548bdbd14ee12a76c1a12d12695abfb30bdd0ce3ffe75aacf577e5574773f6",
+    "controller": "dispatcher",
+    "policy_class": "OpsAttentionPolicy",
+    "parameters": 1659975,
+    "device": "cpu",
+    "training_config": "experiments/runs/11_12_26_reward_pbrs_360k/config.json",
+    "training_scenario": "P03_energy",
+    "training_n_satellites": 48,
+    "training_events": true,
+    "warnings": []
+  },
+  "host": {
+    "python": "3.14.4",
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.43",
+    "cpu_count": 6,
+    "load_average": [
+      6.7802734375,
+      6.66943359375,
+      5.99462890625
+    ]
+  },
+  "versions": {
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "torch": "2.15.0+cpu",
+    "stable_baselines3": "2.9.2",
+    "sb3_contrib": "2.9.2",
+    "gymnasium": "1.4.0",
+    "matplotlib": "3.11.2"
+  },
+  "git": {
+    "commit": "426e13b306c3e55f920e29fac96905af315cd6c1",
+    "branch": "example",
+    "dirty": true
+  }
+}

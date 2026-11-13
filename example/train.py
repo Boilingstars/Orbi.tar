@@ -378,6 +378,30 @@ def _only(agent, controller: str, method: str) -> None:
         raise ValueError(f"{method} trains the {controller}")
 
 
+def _restore_training_checkpoint(model: MaskablePPO, path: str) -> None:
+    """Policy weights and Adam moments. `load_ppo` strips the optimizer; resume must not.
+
+    `_last_obs` from the zip belongs to a dead vec-env, so it is left unset. The next
+    `learn(reset_num_timesteps=False)` then resets the new workers and keeps the step counter.
+    """
+    from stable_baselines3.common.save_util import load_from_zip_file
+
+    data, params, _ = load_from_zip_file(str(path), device=model.device)
+    if not params or "policy" not in params:
+        raise FileNotFoundError(f"checkpoint has no policy weights: {path}")
+    if "policy.optimizer" not in params:
+        raise FileNotFoundError(f"checkpoint has no optimizer state: {path}")
+    model.set_parameters(params, exact_match=False)
+    if not isinstance(data, dict):
+        return
+    if data.get("num_timesteps") is not None:
+        model.num_timesteps = int(data["num_timesteps"])
+    if data.get("_n_updates") is not None:
+        model._n_updates = int(data["_n_updates"])
+    model._last_obs = None
+    model._last_original_obs = None
+
+
 def _split_value_learning_rate(model: MaskablePPO, policy_lr: float, value_lr: float, extra_value=()) -> None:
     """Two Adam groups. SB3 resets every group to the policy step each rollout."""
     net = model.policy.net
@@ -463,8 +487,11 @@ def _build(session: Session, agent, algo) -> MaskablePPO:
     extra = (model.q_head,) if isinstance(model, Mappo) else ()
     _split_value_learning_rate(model, trainer.learning_rate, trainer.value_learning_rate, extra)
 
-    # Optional warm start from a saved policy.
-    if run.load:
+    # Resume restores Adam moments. A weights-only `load` is a warm start on a fresh optimizer.
+    if run.resume and run.load:
+        _restore_training_checkpoint(model, run.load)
+        print(f"Resumed weights and optimizer: {run.load} at {model.num_timesteps} steps", flush=True)
+    elif run.load:
         loaded = load_ppo(run.load)
         model.policy.load_state_dict(loaded.policy.state_dict())
         print(f"Starting weights: {run.load}", flush=True)

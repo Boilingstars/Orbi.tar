@@ -1,12 +1,14 @@
 # example
 
-A shift dispatcher on Orbi.tar. Physics is shared: charge, temperature, calibration, and command admissibility live in `orbi`. The reward is the job's `value_usd` on completion. There is no progress credit.
+A shift dispatcher on Orbi.tar. Physics is shared: charge, temperature, calibration, and command admissibility live in `orbi`. The reward is the job's `value_usd` on completion plus potential-based progress: a tick of work raises Φ, a paused relay keeps it, and a reset downlink drops it.
 
 ```bash
 py -3 -m example.train
 py -3 -m example.evaluate --scenario p02 --policy greedy --events none
-py -3 -m example.baseline --scenario p02 --goal priority
+py -3 -m example.baseline --model experiments/runs/<run>/model.zip --seeds 0:29 --workers 3
 ```
+
+`baseline.py` benchmarks Greedy, Hungarian + capacity repair, and a trained RL checkpoint on P03 fleets of 16–48 satellites (stratified over all six planes, load scaled by N). Every method plays the same common event tape per (N, seed). Results go to `experiments/benchmarks/benchmark_<time>/`: `episodes.csv`, `summary.csv`, `paired_deltas.csv`, `report.json`, `workload.json`, and `plots/`. `--smoke` runs seeds 0–2; `--event-mode native` lets each env draw its own events.
 
 Scenarios: `scenarios/P01_intro.json` (16 satellites), `P02_shift.json` (48), `P03_energy.json`, `P04_demand.json`. Short names: `p01` … `p04`. Each file is initial parameters, including per-satellite orbits. Jobs are sampled from seed. Relay and downlink A/B are drawn from the active terminals (`job_difficulty` is the chance B sits near the mean coverage radius).
 

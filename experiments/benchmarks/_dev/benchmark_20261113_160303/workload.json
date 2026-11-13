@@ -1,0 +1,378 @@
+{
+  "16": {
+    "target": {
+      "n_sats": 16,
+      "initial_jobs": 80,
+      "pool_min": 67,
+      "pool_max": 117,
+      "add_min": 5,
+      "add_max": 9,
+      "downlink_limit": 2,
+      "outage_sats": [
+        1,
+        1
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    },
+    "satellites": [
+      "S01",
+      "S05",
+      "S07",
+      "S11",
+      "S14",
+      "S16",
+      "S17",
+      "S21",
+      "S23",
+      "S26",
+      "S28",
+      "S30",
+      "S33",
+      "S39",
+      "S43",
+      "S45"
+    ],
+    "plane_counts": [
+      3,
+      3,
+      3,
+      3,
+      2,
+      2
+    ],
+    "after_reset": {
+      "downlink_limit": [
+        2
+      ],
+      "initial_jobs": [
+        80
+      ],
+      "events_pool": [
+        "67-117"
+      ],
+      "events_add_jobs_count": [
+        "5-9"
+      ],
+      "events_outage_sats": [
+        "1-1"
+      ],
+      "events_p_add_jobs": [
+        0.0,
+        1.0
+      ],
+      "events_p_outage": [
+        0.0,
+        0.05
+      ]
+    },
+    "tapes": [
+      {
+        "n_sats": 16,
+        "seed": 0,
+        "tape_hash": "8b6be8545b19b22006957158338eb7da489028623ffb91ccc44f2b038f536f97",
+        "initial_hash": "b2f26c94930d4e3fe940e69906a8053a293e7b83b0702a8b71e81a31492515cf",
+        "arrivals_hash": "be85b5224a5fe6a043bb817ff494e629ec49d776bee649a64320e052dd78b1b8",
+        "initial_jobs": 80,
+        "add_events": 246,
+        "offered_jobs": 789,
+        "offered_relay": 233,
+        "offered_downlink": 556,
+        "outage_events": 13,
+        "outage_satellites": 13,
+        "outage_satellite_ticks": 63,
+        "virtual_open_queue_mean": 115.84375,
+        "virtual_open_queue_max": 117,
+        "record_s": 15.136594734038226
+      },
+      {
+        "n_sats": 16,
+        "seed": 1,
+        "tape_hash": "a136070f4c180fd28de3f761d15419986fcd4c0970169d989db25d69b4ac1d07",
+        "initial_hash": "e4da1640aabc97f1ae197c4724ed26138cfddc490a0453c17b1ebe4e9fda89ee",
+        "arrivals_hash": "e888f3058daebda3bdbff094ac8a09f3525295f6158e7244365d19de3aef1ba2",
+        "initial_jobs": 80,
+        "add_events": 264,
+        "offered_jobs": 818,
+        "offered_relay": 249,
+        "offered_downlink": 569,
+        "outage_events": 12,
+        "outage_satellites": 12,
+        "outage_satellite_ticks": 63,
+        "virtual_open_queue_mean": 115.6875,
+        "virtual_open_queue_max": 117,
+        "record_s": 15.782143797026947
+      }
+    ],
+    "realised_mean": {
+      "common/Greedy": {
+        "jobs_generated_total": 122.5,
+        "arrivals_jobs": 42.5,
+        "active_queue_mean": 25.1875,
+        "known_queue_mean": 100.625,
+        "executable_jobs_mean": 5.25,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "common/Hungarian": {
+        "jobs_generated_total": 122.5,
+        "arrivals_jobs": 42.5,
+        "active_queue_mean": 25.4375,
+        "known_queue_mean": 100.875,
+        "executable_jobs_mean": 5.3125,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "common/RL_stochastic": {
+        "jobs_generated_total": 122.5,
+        "arrivals_jobs": 42.5,
+        "active_queue_mean": 26.125,
+        "known_queue_mean": 101.5625,
+        "executable_jobs_mean": 5.5625,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "common/RL_deterministic": {
+        "jobs_generated_total": 122.5,
+        "arrivals_jobs": 42.5,
+        "active_queue_mean": 25.625,
+        "known_queue_mean": 101.0625,
+        "executable_jobs_mean": 5.375,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/Greedy": {
+        "jobs_generated_total": 134.5,
+        "arrivals_jobs": 54.5,
+        "active_queue_mean": 25.875,
+        "known_queue_mean": 103.4375,
+        "executable_jobs_mean": 5.5,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/Hungarian": {
+        "jobs_generated_total": 134.5,
+        "arrivals_jobs": 54.5,
+        "active_queue_mean": 26.125,
+        "known_queue_mean": 103.6875,
+        "executable_jobs_mean": 5.5625,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/RL_stochastic": {
+        "jobs_generated_total": 133.0,
+        "arrivals_jobs": 53.0,
+        "active_queue_mean": 26.75,
+        "known_queue_mean": 104.125,
+        "executable_jobs_mean": 5.75,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/RL_deterministic": {
+        "jobs_generated_total": 134.0,
+        "arrivals_jobs": 54.0,
+        "active_queue_mean": 26.25,
+        "known_queue_mean": 103.8125,
+        "executable_jobs_mean": 5.5625,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      }
+    }
+  },
+  "24": {
+    "target": {
+      "n_sats": 24,
+      "initial_jobs": 120,
+      "pool_min": 100,
+      "pool_max": 175,
+      "add_min": 8,
+      "add_max": 14,
+      "downlink_limit": 3,
+      "outage_sats": [
+        1,
+        2
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    },
+    "satellites": [
+      "S01",
+      "S03",
+      "S05",
+      "S07",
+      "S09",
+      "S11",
+      "S14",
+      "S16",
+      "S17",
+      "S19",
+      "S21",
+      "S23",
+      "S26",
+      "S28",
+      "S30",
+      "S32",
+      "S33",
+      "S35",
+      "S37",
+      "S39",
+      "S41",
+      "S43",
+      "S45",
+      "S47"
+    ],
+    "plane_counts": [
+      4,
+      4,
+      4,
+      4,
+      4,
+      4
+    ],
+    "after_reset": {
+      "downlink_limit": [
+        3
+      ],
+      "initial_jobs": [
+        120
+      ],
+      "events_pool": [
+        "100-175"
+      ],
+      "events_add_jobs_count": [
+        "8-14"
+      ],
+      "events_outage_sats": [
+        "1-2"
+      ],
+      "events_p_add_jobs": [
+        0.0,
+        1.0
+      ],
+      "events_p_outage": [
+        0.0,
+        0.05
+      ]
+    },
+    "tapes": [
+      {
+        "n_sats": 24,
+        "seed": 0,
+        "tape_hash": "990a52e3daf9326201bc7424c907ada484045b796a63a9e1385c6763321e7dac",
+        "initial_hash": "432d0a93515d88a039230f4858b3db9f120347f2d2599f6e73541f931fb819e8",
+        "arrivals_hash": "5873074fbc158c6dbbe3884bffa02d0e4921db4efd08a4104d3fe29cc8aaa1c4",
+        "initial_jobs": 120,
+        "add_events": 275,
+        "offered_jobs": 1155,
+        "offered_relay": 348,
+        "offered_downlink": 807,
+        "outage_events": 17,
+        "outage_satellites": 23,
+        "outage_satellite_ticks": 111,
+        "virtual_open_queue_mean": 173.60069444444446,
+        "virtual_open_queue_max": 175,
+        "record_s": 27.824788485071622
+      },
+      {
+        "n_sats": 24,
+        "seed": 1,
+        "tape_hash": "2e59b66e5ad3f851c87cfec72e4070cc135c99f8b7bfc8acbf772692b7005d45",
+        "initial_hash": "e789c3a12fc05015886e1fd36a71be28efe18608b6e33dc9e7667507d9c2e993",
+        "arrivals_hash": "19908c6e053c2002c168560fa7621ae9a200a1bdb88da3b5674ac771f77979bf",
+        "initial_jobs": 120,
+        "add_events": 263,
+        "offered_jobs": 1168,
+        "offered_relay": 336,
+        "offered_downlink": 832,
+        "outage_events": 10,
+        "outage_satellites": 13,
+        "outage_satellite_ticks": 53,
+        "virtual_open_queue_mean": 174.00347222222223,
+        "virtual_open_queue_max": 175,
+        "record_s": 29.414062386960723
+      }
+    ],
+    "realised_mean": {
+      "common/Greedy": {
+        "jobs_generated_total": 185.5,
+        "arrivals_jobs": 65.5,
+        "active_queue_mean": 37.625,
+        "known_queue_mean": 150.375,
+        "executable_jobs_mean": 9.5,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "common/Hungarian": {
+        "jobs_generated_total": 185.5,
+        "arrivals_jobs": 65.5,
+        "active_queue_mean": 37.4375,
+        "known_queue_mean": 150.1875,
+        "executable_jobs_mean": 9.5,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "common/RL_stochastic": {
+        "jobs_generated_total": 185.5,
+        "arrivals_jobs": 65.5,
+        "active_queue_mean": 38.25,
+        "known_queue_mean": 151.0,
+        "executable_jobs_mean": 9.4375,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "common/RL_deterministic": {
+        "jobs_generated_total": 185.5,
+        "arrivals_jobs": 65.5,
+        "active_queue_mean": 37.75,
+        "known_queue_mean": 150.5,
+        "executable_jobs_mean": 9.4375,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/Greedy": {
+        "jobs_generated_total": 200.0,
+        "arrivals_jobs": 80.0,
+        "active_queue_mean": 38.6875,
+        "known_queue_mean": 153.8125,
+        "executable_jobs_mean": 9.875,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/Hungarian": {
+        "jobs_generated_total": 200.5,
+        "arrivals_jobs": 80.5,
+        "active_queue_mean": 38.5625,
+        "known_queue_mean": 153.75,
+        "executable_jobs_mean": 9.875,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/RL_stochastic": {
+        "jobs_generated_total": 198.5,
+        "arrivals_jobs": 78.5,
+        "active_queue_mean": 39.3125,
+        "known_queue_mean": 154.1875,
+        "executable_jobs_mean": 9.75,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      },
+      "native/RL_deterministic": {
+        "jobs_generated_total": 199.5,
+        "arrivals_jobs": 79.5,
+        "active_queue_mean": 38.875,
+        "known_queue_mean": 153.8125,
+        "executable_jobs_mean": 9.8125,
+        "executable_outside_k_mean": 0.0,
+        "events_outage": 0.0
+      }
+    }
+  }
+}

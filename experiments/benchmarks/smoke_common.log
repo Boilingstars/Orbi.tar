@@ -1,0 +1,41 @@
+benchmark: 15 tasks x 4 methods -> experiments/benchmarks/benchmark_20261113_160729
+  [1/15] common N=16 seed=2 done, 5.0 min
+  [2/15] common N=16 seed=1 done, 5.0 min
+  [3/15] common N=16 seed=0 done, 5.2 min
+  [4/15] common N=24 seed=1 done, 12.3 min
+  [5/15] common N=24 seed=2 done, 12.5 min
+  [6/15] common N=24 seed=0 done, 12.8 min
+  [7/15] common N=32 seed=1 done, 22.3 min
+  [8/15] common N=32 seed=0 done, 22.7 min
+  [9/15] common N=32 seed=2 done, 22.7 min
+  [10/15] common N=40 seed=1 done, 33.9 min
+  [11/15] common N=40 seed=0 done, 34.0 min
+  [12/15] common N=40 seed=2 done, 34.0 min
+  [13/15] common N=48 seed=1 done, 47.8 min
+  [14/15] common N=48 seed=2 done, 47.8 min
+  [15/15] common N=48 seed=0 done, 48.4 min
+
+== event mode: common, 3 seeds (PRELIMINARY) ==
+  N  method                                completed         revenue, USD    USD / completed           missed
+-------------------------------------------------------------------------------------------------------------
+ 16  Greedy                            414.0 +- 82.4      2378.5 +- 510.9         5.7 +- 0.1    452.0 +- 15.1
+ 16  Hungarian + capacity repair       426.7 +- 91.9      2449.8 +- 555.2         5.7 +- 0.1    439.3 +- 11.7
+ 16  RL (MaskablePPO, stochastic)      402.7 +- 71.0      2311.4 +- 388.3         5.7 +- 0.1    463.3 +- 24.9
+ 16  RL (MaskablePPO, deterministic)    381.3 +- 37.6      2163.9 +- 129.1         5.7 +- 0.3    484.7 +- 49.1
+ 24  Greedy                            619.7 +- 36.9      3621.4 +- 203.0         5.8 +- 0.6    667.7 +- 66.5
+ 24  Hungarian + capacity repair       647.3 +- 53.1      3761.2 +- 146.7         5.8 +- 0.6    640.0 +- 80.4
+ 24  RL (MaskablePPO, stochastic)      610.7 +- 46.0      3573.1 +- 215.5         5.9 +- 0.7    676.7 +- 74.2
+ 24  RL (MaskablePPO, deterministic)    577.0 +- 47.2      3337.0 +- 259.4         5.8 +- 0.7    710.3 +- 68.1
+ 32  Greedy                           851.3 +- 112.0      4907.7 +- 710.9         5.8 +- 0.3    861.0 +- 30.5
+ 32  Hungarian + capacity repair      885.3 +- 115.6      5080.2 +- 743.8         5.7 +- 0.3    827.0 +- 33.4
+ 32  RL (MaskablePPO, stochastic)     838.7 +- 111.8      4876.4 +- 697.9         5.8 +- 0.4    873.7 +- 28.6
+ 32  RL (MaskablePPO, deterministic)   801.7 +- 114.8      4496.3 +- 911.3         5.6 +- 0.5    910.7 +- 61.3
+ 40  Greedy                          1084.3 +- 123.7      6142.8 +- 797.6         5.7 +- 0.1   1065.7 +- 62.9
+ 40  Hungarian + capacity repair     1133.0 +- 110.4      6403.1 +- 699.9         5.7 +- 0.2   1017.0 +- 55.9
+ 40  RL (MaskablePPO, stochastic)    1077.0 +- 107.5      6120.7 +- 549.5         5.7 +- 0.2   1073.0 +- 61.2
+ 40  RL (MaskablePPO, deterministic)  1018.7 +- 110.3      5586.6 +- 621.9         5.5 +- 0.1   1131.3 +- 10.0
+ 48  Greedy                          1325.0 +- 121.2      7641.5 +- 460.0         5.8 +- 0.3  1274.3 +- 173.0
+ 48  Hungarian + capacity repair     1378.7 +- 111.8      7945.3 +- 474.7         5.8 +- 0.2  1220.7 +- 163.7
+ 48  RL (MaskablePPO, stochastic)    1316.0 +- 116.4      7602.5 +- 452.4         5.8 +- 0.3  1283.3 +- 166.2
+ 48  RL (MaskablePPO, deterministic)   1249.3 +- 91.0      6892.8 +- 549.4         5.5 +- 0.4  1350.0 +- 144.3
+results: experiments/benchmarks/benchmark_20261113_160729

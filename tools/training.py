@@ -146,9 +146,12 @@ def launch(build, trainer: Trainer, plot=None):
     run.save = str(run_dir / "model.zip")
     model = build(session)
 
-    # A fresh directory, or the steps already written when this launch resumes.
-    started = last_logged_timesteps(run_dir) if run.resume else 0
+    # A fresh directory, or the step counter already on the loaded checkpoint.
+    started = 0
     if run.resume:
+        started = int(getattr(model, "num_timesteps", 0) or 0)
+        if started <= 0:
+            started = last_logged_timesteps(run_dir)
         model.num_timesteps = started
         remaining = max(int(run.timesteps) - started, 0)
         print(f"Resume {run_dir}: {started} steps done, {remaining} left", flush=True)
