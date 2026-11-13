@@ -105,7 +105,15 @@ class Satellite:
         temp = equilibrium + (self.temp_c - equilibrium) * math.exp(-dt / model["thermal_tau_s"])
         return energy, temp, heater, load_w
 
-    def can_take(self, world, job: dict | None, model: dict, k: int) -> tuple[bool, str]:
+    def can_take(
+        self,
+        world,
+        job: dict | None,
+        model: dict,
+        k: int,
+        holder: str | None = None,
+        step_s: float = 300.0,
+    ) -> tuple[bool, str]:
         """Physical take-job check. Subclasses add extra conditions."""
         if job is None:
             return False, "unknown_job"
@@ -120,9 +128,12 @@ class Satellite:
         if not job["release_step"] <= k < job["deadline_step"]:
             return False, "outside_job_window"
 
-        # A downlink has one pass. Starting it without enough ticks left cannot finish.
-        if job.get("kind") == "downlink" and int(job["remaining_steps"]) > int(job["deadline_step"]) - k:
-            return False, "window_too_short"
+        # A downlink needs a continuous run. A new executor restarts from L_j.
+        required = 0
+        if job.get("kind") == "downlink":
+            required = downlink_required_steps(job, self.sat_id, holder)
+            if required > int(job["deadline_step"]) - k:
+                return False, "window_too_short"
 
         if self.calibration_age_steps >= model["calibration_valid_steps"]:
             return False, "calibration_required"
@@ -131,7 +142,26 @@ class Satellite:
         if not job_visible(world, self.index, job):
             reason = "not_addressed" if _is_addressed(job) else "no_contact"
             return False, reason
+
+        if job.get("kind") == "downlink":
+            points = job_points(job)
+            if points:
+                horizon, _nxt = world.access_run_ticks(self.index, points, world.t, step_s=step_s)
+                if required > int(horizon):
+                    return False, "window_too_short"
         return True, "accepted"
+
+
+def downlink_required_steps(job: dict, sat_id: str, holder: str | None) -> int:
+    """Ticks this satellite must still run to finish a one-pass downlink.
+
+    The current holder keeps `remaining_steps`. Anyone else, including a
+    first start, needs the full `work_steps` because a switch resets progress.
+    """
+    remaining = int(job["remaining_steps"])
+    if holder == sat_id:
+        return remaining
+    return int(job["work_steps"])
 
 
 def job_points(job: dict) -> list[tuple]:

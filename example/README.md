@@ -1,9 +1,6 @@
 # example
 
-A shift dispatcher on Orbi.tar. Physics is shared: charge, temperature, calibration, and command admissibility live in `orbi`. The two rewards change only how credit is assigned.
-
-- `priority` — finishing a priority-3 job on time is worth more than 2 or 1, plus a small `value_usd` bonus.
-- `revenue` — `value_usd` is credited when the job completes. Priority stays in the metrics.
+A shift dispatcher on Orbi.tar. Physics is shared: charge, temperature, calibration, and command admissibility live in `orbi`. The reward is the job's `value_usd` on completion. There is no progress credit.
 
 ```bash
 py -3 -m example.train
@@ -15,9 +12,20 @@ Scenarios: `scenarios/P01_intro.json` (16 satellites), `P02_shift.json` (48), `P
 
 `control.py` is the dispatcher (job-slot ranking, fleet or cluster addressing). `satellite.py` subclasses the `orbi` shell: extra attributes, neighbor memory, extra `can_take` rules.
 
+## Relay and downlink
+
+Relay keeps `remaining_steps` across a pause or a change of satellite.
+
+Downlink is one continuous pass by one satellite. It has a single window `release_step`–`deadline_step`. Idle, calibrate, lost view, or a new executor resets `remaining_steps` to `work_steps`. An assignment of satellite `i` is legal only when the ticks still needed fit in both the time left to the deadline and that satellite's current access run:
+
+- the current holder needs the remaining ticks
+- anyone else needs the full duration, because a switch resets progress
+
+The same rule is used for the action mask, `can_execute()`, and `step()`. Idle stays legal, so a downlink can be dropped for a better request.
+
 ## Observation
 
-`N_max = 48`, `K = 32` job slots. Rows beyond the real fleet are zeros: zero capacity is how padding is told from a satellite.
+`N_max = 48`, `K = 64` job slots. Rows beyond the real fleet are zeros: zero capacity is how padding is told from a satellite.
 
 | Tensor | Shape | Contents |
 |--------|-------|----------|
@@ -29,7 +37,7 @@ Scenarios: `scenarios/P01_intro.json` (16 satellites), `P02_shift.json` (48), `P
 | `global` | `7` | step, open jobs, priority 3, downlink demand, cap, mean and min SoC |
 | `mask` | `48 x (K+2)` | valid actions |
 
-A satellite action is a job slot, idle, or calibrate. The previous job is not locked: idle, calibrate, or another slot drops it and keeps `remaining_steps`. Ground control packs one job slot per satellite ([control.py](control.py)). Neighbor memory is [satellite.py](satellite.py): `competitors` (default) or `nearest_index`. `_baseline_repair` is off unless `baseline_repair=true`.
+A satellite action is a job slot, idle, or calibrate. Ground control packs `K = 64` job slots ([control.py](control.py)). Neighbor memory is [satellite.py](satellite.py): `competitors` (default) or `nearest_index`. `_baseline_repair` is off unless `baseline_repair=true`.
 
 ## Network
 

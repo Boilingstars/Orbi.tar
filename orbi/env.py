@@ -254,6 +254,7 @@ class OpsEnv(gym.Env):
         self._mask = np.zeros((self.N, self.K + 2), dtype=bool)
         self._candidates: list[_Candidate] = []
         self._last_executor: dict[str, str] = {}
+        self._downlink_holder: dict[str, str] = {}
         self._event_counter = 0
         self._commands: list[dict] = []
         self.ops_stats: dict[str, float] = {}
@@ -367,7 +368,10 @@ class OpsEnv(gym.Env):
         if kind == "calibrate":
             power = sat.calibration_w
         elif kind == "job":
-            ok, reason = sat.can_take(self.world, job, self.model, self.k)
+            holder = self._downlink_holder.get(job["id"]) if job else None
+            ok, reason = sat.can_take(
+                self.world, job, self.model, self.k, holder=holder, step_s=self.dt
+            )
             if not ok:
                 return False, reason, 0.0
             power = sat.payload_w(kind, job)

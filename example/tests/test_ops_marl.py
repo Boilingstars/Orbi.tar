@@ -30,6 +30,8 @@ def _inject_job(env: OpsEnv, sats: list[str], job_id: str, kind: str, work: int 
         env.sats[sid].calibration_age_steps = 0
     lat, lon, _ = env.world.lla(env.sats[sats[0]].index)
     env.world.sees_job = lambda *args, **kwargs: True
+    if kind == "downlink":
+        env.world.access_run_ticks = lambda *args, **kwargs: (max(int(work), int(life), 8), 0.0)
     env._apply_event(
         {
             "type": "add_jobs",
@@ -181,6 +183,53 @@ def test_downlink_too_short_to_finish_is_masked():
     ok, reason, _ = env.can_execute(first, {"action": "job", "job_id": job_id})
     assert not ok
     assert reason == "window_too_short"
+
+
+def test_downlink_switch_is_masked_when_restart_cannot_finish():
+    env = _env()
+    env.reset(seed=0)
+    first, second = env.sat_ids[:2]
+    job_id = _inject_downlink(env, [first, second], "DL-late", work=4, life=4)
+    for _ in range(3):
+        env._advance({first: {"action": "job", "job_id": job_id}})
+    job = env.jobs[job_id]
+    assert job["remaining_steps"] == 1
+    assert env._downlink_holder.get(job_id) == first
+    ok, reason, _ = env.can_execute(second, {"action": "job", "job_id": job_id})
+    assert not ok
+    assert reason == "window_too_short"
+    ok, reason, _ = env.can_execute(first, {"action": "job", "job_id": job_id})
+    assert ok
+    idle_ok, _, _ = env.can_execute(first, {"action": "idle"})
+    assert idle_ok
+    env._observe()
+    slot = {c.job_id: s for s, c in enumerate(env._candidates)}[job_id]
+    i_first = env.sat_ids.index(first)
+    i_second = env.sat_ids.index(second)
+    assert not env._mask[i_second, slot]
+    assert env._mask[i_first, slot]
+    assert env._mask[i_first, env.idle_index]
+    env._advance({second: {"action": "job", "job_id": job_id}})
+    assert job["remaining_steps"] == 4
+    rows = {r["satellite_id"]: r for r in env.trace[-env.n_sats :]}
+    assert rows[second]["executed"] == "idle"
+    assert rows[second]["reason"] == "window_too_short"
+
+
+def test_downlink_short_access_run_is_masked():
+    env = _env()
+    env.reset(seed=0)
+    first = env.sat_ids[0]
+    job_id = _inject_downlink(env, [first], "DL-geom", work=4, life=10)
+    env.world.access_run_ticks = lambda *args, **kwargs: (1, 0.0)
+    env.jobs = {job_id: env.jobs[job_id]}
+    ok, reason, _ = env.can_execute(first, {"action": "job", "job_id": job_id})
+    assert not ok
+    assert reason == "window_too_short"
+    env._observe()
+    slot = {c.job_id: s for s, c in enumerate(env._candidates)}[job_id]
+    assert not env._mask[0, slot]
+    assert env._mask[0, env.idle_index]
 
 
 def test_neighbor_methods_and_padding():

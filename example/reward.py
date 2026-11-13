@@ -1,13 +1,8 @@
 """Reward for this package.
 
-A finished job pays its dollar price. Progress on unfinished work is a
-potential: completing a tick raises it, pausing a relay keeps it, and
-resetting a downlink drops it. The step bonus is γΦ(s') − Φ(s), with γ
-the PPO discount, so the undiscounted sum of bonuses telescopes to zero
-when the episode potential starts and ends at zero.
-
-`job_worth` still adds the priority bonus. The observation and the slot
-ranker read that, so a loaded policy keeps the same inputs.
+A finished job pays its dollar price. There is no progress credit and no
+step penalty. `beta=0` turns off the unused potential; `job_worth` still
+adds the priority bonus the observation and the slot ranker read.
 """
 
 from __future__ import annotations
@@ -33,7 +28,7 @@ def job_worth(job: dict, priority_bonus: tuple[float, float, float] = _PRIORITY_
 
 @dataclass
 class MyReward(Reward):
-    """Dollar completions plus potential-based progress. No penalties."""
+    """Dollar completions. No progress credit and no penalties."""
 
     progress: float = 0.0
     below_reserve: float = 0.0
@@ -43,7 +38,7 @@ class MyReward(Reward):
     conflict: float = 0.0
     early_calibrate: float = 0.0
     gamma: float = _GAMMA
-    beta: float = 1.0
+    beta: float = 0.0
     _phi: float = field(default=0.0, repr=False, compare=False)
 
     def worth(self, job: dict) -> float:
@@ -79,6 +74,9 @@ class MyReward(Reward):
 
     def score(self, env, rows, prev_executor, stats):
         reward = super().score(env, rows, prev_executor, stats)
+        if self.beta == 0.0:
+            self._phi = 0.0
+            return reward
 
         # Φ(s') is zero on the terminal tick so leftover progress does not leak past T.
         terminal = env.k >= env.steps_total or (

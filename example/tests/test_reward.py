@@ -1,4 +1,4 @@
-"""Completions pay dollars. Progress is a potential, not a kept bonus."""
+"""Completions pay dollars. Default beta=0 does not credit unfinished work."""
 
 import pytest
 
@@ -77,13 +77,26 @@ def test_penalties_are_off():
 
 
 def test_complete_pays_the_price_once():
-    reward = MyReward(gamma=1.0, beta=1.0)
+    reward = MyReward()
     job = _job(remaining=0, work=4, usd=8.0)
     job["completed_step"] = 4
     env = _Env(job, k=4)
     reward.reset_potential(env)
     got = reward.score(env, [_row(job["id"], completed=job["id"])], {}, {"conflicts": 4.0, "early_calibrations": 3.0})
     assert got == pytest.approx(8.0)
+    assert reward.beta == 0.0
+
+
+def test_beta_zero_does_not_credit_progress():
+    reward = MyReward()
+    job = _job(remaining=4, work=4, usd=8.0, deadline=10)
+    env = _Env(job, k=0, steps=20)
+    reward.reset_potential(env)
+    job["remaining_steps"] = 3
+    env.k = 1
+    got = reward.score(env, [_row(job["id"])], {}, {"conflicts": 0.0, "early_calibrations": 0.0})
+    assert got == pytest.approx(0.0)
+    assert reward._phi == pytest.approx(0.0)
 
 
 def test_shaping_telescopes_on_a_finished_job():
