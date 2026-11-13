@@ -1,0 +1,18 @@
+{
+  "run_dir": "/root/Orbi.tar/experiments/runs/11_12_26_reward_pbrs",
+  "best_checkpoint": "/root/Orbi.tar/experiments/runs/11_12_26_reward_pbrs/best_ckpt_117760.zip",
+  "best_timesteps": 117760,
+  "best_revenue_usd": 7559.128750000001,
+  "final_timesteps": 119808,
+  "final_revenue_usd": 7403.5912499999995,
+  "best_downlink_slots_used": 1127.125,
+  "downlink_cap_per_episode": 1728,
+  "best_downlink_occupancy": 0.6522714120370371,
+  "final_downlink_occupancy": 0.6471354166666666,
+  "downlink_first_try_share": 1.0,
+  "downlink_tick_yield": 0.7325278778306568,
+  "downlink_resets": 301.875,
+  "approx_kl_joint_final": 0.0664326548576355,
+  "explained_variance_final": 0.9939550161361694,
+  "load": "/root/Orbi.tar/experiments/runs/11_12_26_reward_dollars_240k/checkpoints/ckpt_113664.zip"
+}
