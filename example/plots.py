@@ -132,19 +132,33 @@ def plot_run(run_dir: Path | str) -> list[Path]:
         return True
 
     def priority(_fig, ax) -> bool:
-        ok = _line(ax, data, "ops/critical_done_on_time", "Priority 3 on time", color="tab:green")
-        ok |= _line(ax, data, "ops/jobs_due_missed", "Missed jobs", color="tab:red")
-        if not ok:
+        # Same file as before: downlink resets vs completed downlinks, two axes.
+        ok = _line(ax, data, "ops/downlink_resets", "Downlink resets", color="tab:red")
+        ax2 = ax.twinx()
+        ok2 = _line(ax2, data, "ops/done_downlink", "Done downlink", color="tab:blue")
+        if not (ok or ok2):
             return False
-        ax.set_title(f"Priority service — {tag}")
+        ax.set_title(f"Downlink resets — {tag}")
         ax.set_xlabel("Timesteps")
-        ax.set_ylabel("Jobs per episode")
-        ax.legend()
+        ax.set_ylabel("Resets per episode")
+        ax2.set_ylabel("Downlinks completed")
+        lines, labels = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines + lines2, labels + labels2, loc="best")
         ax.grid(alpha=0.3)
         return True
 
     def revenue(_fig, ax) -> bool:
-        if not _line(ax, data, "ops/revenue_usd", "Revenue", color="tab:orange"):
+        ok = _line(ax, data, "ops/revenue_usd", "Revenue", color="tab:orange")
+        ok |= _line(
+            ax,
+            data,
+            "rollout/ep_rew_mean",
+            "ep_rew_mean",
+            color="tab:orange",
+            linestyle="--",
+        )
+        if not ok:
             return False
         ax2 = ax.twinx()
         _line(ax2, data, "ops/jobs_completed", "Jobs completed", color="tab:green")
@@ -159,15 +173,15 @@ def plot_run(run_dir: Path | str) -> list[Path]:
         return True
 
     def energy(_fig, ax) -> bool:
-        if not _line(ax, data, "ops/min_soc_pct", "Min SoC", color="tab:blue"):
+        # Same file as before: mean completed-job value by kind.
+        ok = _line(ax, data, "ops/mean_value_downlink", "Mean value downlink", color="tab:orange")
+        ok |= _line(ax, data, "ops/mean_value_relay", "Mean value relay", color="tab:blue")
+        if not ok:
             return False
-        critical = _critical_soc_pct(run_dir)
-        ax.axhspan(0, critical, color="tab:red", alpha=0.12, zorder=0, label=f"Critical SoC ({critical:g}%)")
-        ax.set_title(f"Energy — {tag}")
+        ax.set_title(f"Job value — {tag}")
         ax.set_xlabel("Timesteps")
-        ax.set_ylabel("Min SoC, %")
-        ax.set_ylim(0, 100)
-        ax.legend(loc="lower right")
+        ax.set_ylabel("USD per completed job")
+        ax.legend(loc="best")
         ax.grid(alpha=0.3)
         return True
 

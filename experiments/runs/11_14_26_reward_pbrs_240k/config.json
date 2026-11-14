@@ -16,10 +16,10 @@
   "max_steps": null,
   "tensorboard": false,
   "subproc": true,
-  "load": "/root/Orbi.tar/experiments/runs/11_13_26_reward_pbrs_240k/resume_latest.zip",
-  "save": "/root/Orbi.tar/experiments/runs/11_13_26_reward_pbrs_240k/model.zip",
-  "run_dir": "/root/Orbi.tar/experiments/runs/11_13_26_reward_pbrs_240k",
-  "resume": true,
+  "load": null,
+  "save": "/root/Orbi.tar/experiments/runs/11_14_26_reward_pbrs_240k/model.zip",
+  "run_dir": "/root/Orbi.tar/experiments/runs/11_14_26_reward_pbrs_240k",
+  "resume": false,
   "scenario_id": "P03_energy",
   "n_satellites": 48,
   "steps": 288,
@@ -39,7 +39,7 @@
   "kl_budget": "per_sat",
   "suite": "example",
   "policy_name": "dispatcher",
-  "resumed_from": 27648,
+  "resumed_from": null,
   "algorithm": {
     "learning_rate": 3e-05,
     "value_learning_rate": 0.0003,
@@ -63,10 +63,10 @@
     "every_s": null,
     "every_steps": null,
     "every_n_max": 1,
-    "max_metric": "ops/revenue_usd"
+    "max_metric": "rollout/ep_rew_mean"
   },
   "plots": {
-    "every_s": 1200,
+    "every_s": null,
     "on_log": true
   }
 }

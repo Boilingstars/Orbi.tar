@@ -29,7 +29,7 @@ from tools.telemetry import (
 # CHECKPOINT_EVERY_STEPS = 10_000
 
 # New maximum of this logged column. EVERY_N_MAX = 1 keeps every new maximum.
-CHECKPOINT_MAX_METRIC = "ops/revenue_usd"
+CHECKPOINT_MAX_METRIC = "rollout/ep_rew_mean"
 CHECKPOINT_EVERY_N_MAX = 1
 
 
