@@ -7,6 +7,7 @@ be commented out; a checkpoint is written when any enabled rule fires.
 
 from __future__ import annotations
 
+import csv
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -262,6 +263,10 @@ class RunArtifactsCallback(BaseCallback):
         self._steps_mark = self.num_timesteps
         (self.run_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
 
+        # A resumed run only saves a peak above what progress.csv already holds.
+        if self._best is None:
+            self._best = _logged_max(self.run_dir / "progress.csv", self.max_metric)
+
     def _on_step(self) -> bool:
         now = time.monotonic()
 
@@ -319,6 +324,21 @@ class RunArtifactsCallback(BaseCallback):
         path = self.run_dir / "checkpoints" / f"ckpt_{self.num_timesteps}.zip"
         self.model.save(str(path))
         print(f"Weight checkpoint: {path}", flush=True)
+
+
+def _logged_max(progress: Path, metric: str | None) -> float | None:
+    if not metric or not progress.exists() or progress.stat().st_size == 0:
+        return None
+    best = None
+    with progress.open(encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh):
+            raw = row.get(metric)
+            if raw in (None, ""):
+                continue
+            value = float(raw)
+            if best is None or value > best:
+                best = value
+    return best
 
 
 def _algorithm(trainer: Trainer) -> dict:
