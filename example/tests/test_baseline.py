@@ -488,6 +488,42 @@ def test_cli_parses_ranges_and_smoke():
     assert rl.method_names() == [GREEDY, HUNGARIAN, RL_DETERMINISTIC, RL_STOCHASTIC]
 
 
+def test_cli_parses_several_checkpoints_and_labels():
+    opts = bench.parse(
+        [
+            "--model",
+            "experiments/runs/11_12_26_reward_pbrs_240k/model.zip",
+            "--model",
+            "experiments/runs/11_14_26_reward_pbrs_500k/model.zip:mid",
+            "--model",
+            "late.zip",
+            "--workers",
+            "auto",
+        ]
+    )
+    assert opts.model_list() == (
+        "experiments/runs/11_12_26_reward_pbrs_240k/model.zip",
+        "experiments/runs/11_14_26_reward_pbrs_500k/model.zip",
+        "late.zip",
+    )
+    assert opts.method_names() == [GREEDY, HUNGARIAN, "RL_pbrs_240k", "RL_mid", "RL_late"]
+    assert opts.workers == 0
+    named = bench.parse(["--model", "m.zip:alpha", "--rl-mode", "deterministic", "--rl-secondary", "--workers", "4"])
+    assert named.method_names() == [GREEDY, HUNGARIAN, "RL_alpha_det", "RL_alpha"]
+    assert named.workers == 4
+
+
+def test_resolve_workers_caps_to_tasks_and_auto_is_at_least_one():
+    n, note = bench.resolve_workers(8, n_tasks=3, n_models=3)
+    assert n == 3
+    assert "requested 8" in note
+    auto, auto_note = bench.resolve_workers(0, n_tasks=15, n_models=3)
+    assert 1 <= auto <= 15
+    assert "auto" in auto_note
+    assert bench._default_model_label("experiments/runs/11_15_26_reward_pbrs_880k/model.zip") == "pbrs_880k"
+    assert bench._default_model_label("experiments/runs/11_15_26_reward_pbrs_880k/checkpoints/ckpt_1.zip") == "ckpt_1"
+
+
 def test_results_never_land_in_the_repository_root():
     with pytest.raises(SystemExit, match="repository root"):
         bench.run_benchmark(Options(methods=("greedy",), output=str(bench.REPO)))

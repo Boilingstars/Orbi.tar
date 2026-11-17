@@ -1,0 +1,195 @@
+log=/root/Orbi.tar/experiments/benchmarks/baseline_pbrs_880k_ckpts_20261117_145212.log
+start 2026-11-17T14:52:12+00:00
+nproc=1
+               total        used        free      shared  buff/cache   available
+Mem:           5.8Gi       1.1Gi       3.8Gi        19Mi       1.2Gi       4.7Gi
+Swap:          4.0Gi          0B       4.0Gi
+load 0.41 0.95 2.45 1/281 13159
+---
+benchmark: 15 tasks x 6 methods, 5 workers (auto cpu=6 mem_available=4336MB per_worker~500MB models=6) -> /root/Orbi.tar/experiments/benchmarks/benchmark_20261117_145214
+worker pid=13242 loading pbrs_240k
+worker pid=13243 loading pbrs_240k
+worker pid=13245 loading pbrs_240k
+worker pid=13244 loading pbrs_240k
+worker pid=13241 loading pbrs_240k
+worker pid=13244 loading ckpt_504832
+worker pid=13242 loading ckpt_504832
+worker pid=13241 loading ckpt_504832
+worker pid=13245 loading ckpt_504832
+worker pid=13243 loading ckpt_504832
+worker pid=13244 loading ckpt_649216
+worker pid=13242 loading ckpt_649216
+worker pid=13241 loading ckpt_649216
+worker pid=13245 loading ckpt_649216
+worker pid=13242 loading ckpt_716800
+worker pid=13245 loading ckpt_716800
+worker pid=13243 loading ckpt_649216
+worker pid=13241 loading ckpt_716800
+worker pid=13242 loading ckpt_769024
+worker pid=13244 loading ckpt_716800
+worker pid=13245 loading ckpt_769024
+worker pid=13243 loading ckpt_716800
+worker pid=13241 loading ckpt_769024
+worker pid=13242 loading ckpt_787456
+worker pid=13244 loading ckpt_769024
+worker pid=13245 loading ckpt_787456
+worker pid=13241 loading ckpt_787456
+worker pid=13243 loading ckpt_769024
+worker pid=13244 loading ckpt_787456
+worker pid=13243 loading ckpt_787456
+    common N=16 seed=2 tape 11.9s
+    common N=16 seed=0 tape 13.7s
+    common N=16 seed=1 tape 14.4s
+    common N=24 seed=0 tape 25.2s
+    common N=24 seed=1 tape 25.4s
+    common N=16 seed=2 RL_pbrs_240k 66.9s
+    common N=16 seed=1 RL_pbrs_240k 69.6s
+    common N=16 seed=0 RL_pbrs_240k 73.0s
+    common N=24 seed=1 RL_pbrs_240k 94.9s
+    common N=24 seed=0 RL_pbrs_240k 97.6s
+    common N=16 seed=2 RL_ckpt_504832 70.2s
+    common N=16 seed=1 RL_ckpt_504832 69.2s
+    common N=16 seed=0 RL_ckpt_504832 72.0s
+    common N=24 seed=1 RL_ckpt_504832 96.9s
+    common N=16 seed=2 RL_ckpt_649216 69.3s
+    common N=24 seed=0 RL_ckpt_504832 100.7s
+    common N=16 seed=1 RL_ckpt_649216 70.5s
+    common N=16 seed=0 RL_ckpt_649216 74.3s
+    common N=16 seed=2 RL_ckpt_716800 71.3s
+    common N=16 seed=1 RL_ckpt_716800 69.6s
+    common N=16 seed=0 RL_ckpt_716800 72.2s
+    common N=24 seed=1 RL_ckpt_649216 97.1s
+    common N=24 seed=0 RL_ckpt_649216 98.7s
+    common N=16 seed=2 RL_ckpt_769024 71.7s
+    common N=16 seed=1 RL_ckpt_769024 68.1s
+    common N=16 seed=0 RL_ckpt_769024 72.4s
+    common N=24 seed=1 RL_ckpt_716800 96.8s
+    common N=24 seed=0 RL_ckpt_716800 99.4s
+    common N=16 seed=2 RL_ckpt_787456 69.9s
+  [1/15] common N=16 seed=2 task=431.3s RL_pbrs_240k=66.9s RL_ckpt_504832=70.2s RL_ckpt_649216=69.3s RL_ckpt_716800=71.3s RL_ckpt_769024=71.7s RL_ckpt_787456=69.9s  elapsed 7.3 min  ETA 101.7 min  remaining 14
+    common N=16 seed=1 RL_ckpt_787456 70.8s
+  [2/15] common N=16 seed=1 task=432.3s RL_pbrs_240k=69.6s RL_ckpt_504832=69.2s RL_ckpt_649216=70.5s RL_ckpt_716800=69.6s RL_ckpt_769024=68.1s RL_ckpt_787456=70.8s  elapsed 7.3 min  ETA 47.3 min  remaining 13
+    common N=16 seed=0 RL_ckpt_787456 78.8s
+  [3/15] common N=16 seed=0 task=456.5s RL_pbrs_240k=73.0s RL_ckpt_504832=72.0s RL_ckpt_649216=74.3s RL_ckpt_716800=72.2s RL_ckpt_769024=72.4s RL_ckpt_787456=78.8s  elapsed 7.7 min  ETA 30.7 min  remaining 12
+    common N=24 seed=2 tape 28.9s
+    common N=32 seed=0 tape 45.7s
+    common N=32 seed=1 tape 49.0s
+    common N=24 seed=1 RL_ckpt_769024 98.5s
+    common N=24 seed=0 RL_ckpt_769024 103.4s
+    common N=24 seed=2 RL_pbrs_240k 95.8s
+    common N=24 seed=1 RL_ckpt_787456 93.9s
+  [4/15] common N=24 seed=1 task=603.4s RL_pbrs_240k=94.9s RL_ckpt_504832=96.9s RL_ckpt_649216=97.1s RL_ckpt_716800=96.8s RL_ckpt_769024=98.5s RL_ckpt_787456=93.9s  elapsed 10.1 min  ETA 27.9 min  remaining 11
+    common N=32 seed=0 RL_pbrs_240k 132.2s
+    common N=24 seed=0 RL_ckpt_787456 98.2s
+  [5/15] common N=24 seed=0 task=623.3s RL_pbrs_240k=97.6s RL_ckpt_504832=100.7s RL_ckpt_649216=98.7s RL_ckpt_716800=99.4s RL_ckpt_769024=103.4s RL_ckpt_787456=98.2s  elapsed 10.5 min  ETA 20.9 min  remaining 10
+    common N=32 seed=1 RL_pbrs_240k 124.2s
+    common N=32 seed=2 tape 41.9s
+    common N=24 seed=2 RL_ckpt_504832 95.6s
+    common N=40 seed=0 tape 60.8s
+    common N=32 seed=0 RL_ckpt_504832 131.7s
+    common N=24 seed=2 RL_ckpt_649216 92.6s
+    common N=32 seed=1 RL_ckpt_504832 125.6s
+    common N=32 seed=2 RL_pbrs_240k 127.3s
+    common N=24 seed=2 RL_ckpt_716800 93.6s
+    common N=40 seed=0 RL_pbrs_240k 163.1s
+    common N=32 seed=0 RL_ckpt_649216 133.3s
+    common N=32 seed=1 RL_ckpt_649216 123.3s
+    common N=32 seed=2 RL_ckpt_504832 124.1s
+    common N=24 seed=2 RL_ckpt_769024 92.5s
+    common N=32 seed=1 RL_ckpt_716800 122.5s
+    common N=32 seed=0 RL_ckpt_716800 129.6s
+    common N=40 seed=0 RL_ckpt_504832 160.2s
+    common N=32 seed=2 RL_ckpt_649216 124.4s
+    common N=24 seed=2 RL_ckpt_787456 91.9s
+  [6/15] common N=24 seed=2 task=590.9s RL_pbrs_240k=95.8s RL_ckpt_504832=95.6s RL_ckpt_649216=92.6s RL_ckpt_716800=93.6s RL_ckpt_769024=92.5s RL_ckpt_787456=91.9s  elapsed 17.1 min  ETA 25.7 min  remaining 9
+    common N=40 seed=1 tape 65.5s
+    common N=32 seed=1 RL_ckpt_769024 124.0s
+    common N=32 seed=0 RL_ckpt_769024 130.2s
+    common N=32 seed=2 RL_ckpt_716800 124.8s
+    common N=40 seed=0 RL_ckpt_649216 159.6s
+    common N=40 seed=1 RL_pbrs_240k 151.8s
+    common N=32 seed=1 RL_ckpt_787456 128.9s
+  [7/15] common N=32 seed=1 task=797.4s RL_pbrs_240k=124.2s RL_ckpt_504832=125.6s RL_ckpt_649216=123.3s RL_ckpt_716800=122.5s RL_ckpt_769024=124.0s RL_ckpt_787456=128.9s  elapsed 21.0 min  ETA 24.0 min  remaining 8
+    common N=32 seed=0 RL_ckpt_787456 129.4s
+  [8/15] common N=32 seed=0 task=832.0s RL_pbrs_240k=132.2s RL_ckpt_504832=131.7s RL_ckpt_649216=133.3s RL_ckpt_716800=129.6s RL_ckpt_769024=130.2s RL_ckpt_787456=129.4s  elapsed 21.1 min  ETA 18.5 min  remaining 7
+    common N=32 seed=2 RL_ckpt_769024 124.4s
+    common N=40 seed=2 tape 57.4s
+    common N=40 seed=0 RL_ckpt_716800 158.8s
+    common N=48 seed=0 tape 78.8s
+    common N=40 seed=1 RL_ckpt_504832 152.7s
+    common N=32 seed=2 RL_ckpt_787456 125.6s
+  [9/15] common N=32 seed=2 task=792.5s RL_pbrs_240k=127.3s RL_ckpt_504832=124.1s RL_ckpt_649216=124.4s RL_ckpt_716800=124.8s RL_ckpt_769024=124.4s RL_ckpt_787456=125.6s  elapsed 23.3 min  ETA 15.6 min  remaining 6
+    common N=40 seed=2 RL_pbrs_240k 154.1s
+    common N=48 seed=1 tape 84.5s
+    common N=40 seed=0 RL_ckpt_769024 164.6s
+    common N=48 seed=0 RL_pbrs_240k 190.9s
+    common N=40 seed=1 RL_ckpt_649216 150.9s
+    common N=40 seed=2 RL_ckpt_504832 150.5s
+    common N=40 seed=0 RL_ckpt_787456 162.6s
+  [10/15] common N=40 seed=0 task=1029.7s RL_pbrs_240k=163.1s RL_ckpt_504832=160.2s RL_ckpt_649216=159.6s RL_ckpt_716800=158.8s RL_ckpt_769024=164.6s RL_ckpt_787456=162.6s  elapsed 27.6 min  ETA 13.8 min  remaining 5
+    common N=48 seed=1 RL_pbrs_240k 184.8s
+    common N=40 seed=1 RL_ckpt_716800 153.7s
+    common N=48 seed=2 tape 77.9s
+    common N=48 seed=0 RL_ckpt_504832 201.1s
+    common N=40 seed=2 RL_ckpt_649216 151.5s
+    common N=40 seed=1 RL_ckpt_769024 153.2s
+    common N=48 seed=1 RL_ckpt_504832 186.5s
+    common N=48 seed=2 RL_pbrs_240k 182.3s
+    common N=40 seed=2 RL_ckpt_716800 156.5s
+    common N=48 seed=0 RL_ckpt_649216 198.6s
+    common N=40 seed=1 RL_ckpt_787456 155.0s
+  [11/15] common N=40 seed=1 task=982.8s RL_pbrs_240k=151.8s RL_ckpt_504832=152.7s RL_ckpt_649216=150.9s RL_ckpt_716800=153.7s RL_ckpt_769024=153.2s RL_ckpt_787456=155.0s  elapsed 33.5 min  ETA 12.2 min  remaining 4
+    common N=48 seed=1 RL_ckpt_649216 188.3s
+    common N=40 seed=2 RL_ckpt_769024 152.0s
+    common N=48 seed=2 RL_ckpt_504832 187.5s
+    common N=48 seed=0 RL_ckpt_716800 200.2s
+    common N=48 seed=1 RL_ckpt_716800 183.0s
+    common N=40 seed=2 RL_ckpt_787456 154.4s
+  [12/15] common N=40 seed=2 task=976.5s RL_pbrs_240k=154.1s RL_ckpt_504832=150.5s RL_ckpt_649216=151.5s RL_ckpt_716800=156.5s RL_ckpt_769024=152.0s RL_ckpt_787456=154.4s  elapsed 37.2 min  ETA 9.3 min  remaining 3
+    common N=48 seed=2 RL_ckpt_649216 183.7s
+    common N=48 seed=0 RL_ckpt_769024 200.5s
+    common N=48 seed=1 RL_ckpt_769024 182.4s
+    common N=48 seed=2 RL_ckpt_716800 185.8s
+    common N=48 seed=0 RL_ckpt_787456 197.1s
+  [13/15] common N=48 seed=0 task=1267.2s RL_pbrs_240k=190.9s RL_ckpt_504832=201.1s RL_ckpt_649216=198.6s RL_ckpt_716800=200.2s RL_ckpt_769024=200.5s RL_ckpt_787456=197.1s  elapsed 42.3 min  ETA 6.5 min  remaining 2
+    common N=48 seed=1 RL_ckpt_787456 189.4s
+  [14/15] common N=48 seed=1 task=1199.0s RL_pbrs_240k=184.8s RL_ckpt_504832=186.5s RL_ckpt_649216=188.3s RL_ckpt_716800=183.0s RL_ckpt_769024=182.4s RL_ckpt_787456=189.4s  elapsed 43.3 min  ETA 3.1 min  remaining 1
+    common N=48 seed=2 RL_ckpt_769024 186.2s
+    common N=48 seed=2 RL_ckpt_787456 181.7s
+  [15/15] common N=48 seed=2 task=1185.1s RL_pbrs_240k=182.3s RL_ckpt_504832=187.5s RL_ckpt_649216=183.7s RL_ckpt_716800=185.8s RL_ckpt_769024=186.2s RL_ckpt_787456=181.7s  elapsed 47.4 min  ETA 0.0 min  remaining 0
+
+== event mode: common, 3 seeds (PRELIMINARY) ==
+  N  method                                completed         revenue, USD    USD / completed           missed
+-------------------------------------------------------------------------------------------------------------
+ 16  RL (pbrs_240k, stochastic)        402.7 +- 71.0      2311.4 +- 388.3         5.7 +- 0.1    463.3 +- 24.9
+ 16  RL (ckpt_504832, stochastic)      408.7 +- 74.3      2226.5 +- 492.3         5.4 +- 0.2    457.3 +- 21.1
+ 16  RL (ckpt_649216, stochastic)      389.7 +- 83.2      2199.7 +- 444.8         5.6 +- 0.1     476.3 +- 5.7
+ 16  RL (ckpt_716800, stochastic)      401.7 +- 85.8      2294.3 +- 416.5         5.7 +- 0.2     464.3 +- 2.9
+ 16  RL (ckpt_769024, stochastic)      405.7 +- 83.4      2328.0 +- 475.8         5.7 +- 0.0     460.3 +- 1.4
+ 16  RL (ckpt_787456, stochastic)      406.7 +- 73.3      2319.4 +- 399.9         5.7 +- 0.1    459.3 +- 11.5
+ 24  RL (pbrs_240k, stochastic)        610.7 +- 46.0      3573.1 +- 215.5         5.9 +- 0.7    676.7 +- 74.2
+ 24  RL (ckpt_504832, stochastic)      619.7 +- 35.3      3453.6 +- 123.0         5.6 +- 0.5    667.7 +- 64.1
+ 24  RL (ckpt_649216, stochastic)      594.3 +- 33.1      3408.0 +- 251.1         5.7 +- 0.7    693.0 +- 58.2
+ 24  RL (ckpt_716800, stochastic)      608.0 +- 46.5      3544.8 +- 148.7         5.8 +- 0.7    679.3 +- 75.9
+ 24  RL (ckpt_769024, stochastic)      612.3 +- 55.2      3574.5 +- 115.1         5.8 +- 0.7    675.0 +- 83.1
+ 24  RL (ckpt_787456, stochastic)      615.0 +- 34.5      3597.7 +- 175.7         5.9 +- 0.6    672.3 +- 63.1
+ 32  RL (pbrs_240k, stochastic)       838.7 +- 111.8      4876.4 +- 697.9         5.8 +- 0.4    873.7 +- 28.6
+ 32  RL (ckpt_504832, stochastic)     851.0 +- 111.9      4744.6 +- 620.9         5.6 +- 0.3    861.3 +- 28.6
+ 32  RL (ckpt_649216, stochastic)     824.3 +- 123.0      4674.9 +- 658.5         5.7 +- 0.4    888.0 +- 39.7
+ 32  RL (ckpt_716800, stochastic)     830.7 +- 104.8      4814.3 +- 704.4         5.8 +- 0.3    881.7 +- 25.1
+ 32  RL (ckpt_769024, stochastic)     840.0 +- 104.2      4863.7 +- 738.3         5.8 +- 0.3    872.3 +- 27.3
+ 32  RL (ckpt_787456, stochastic)     841.3 +- 104.6      4847.5 +- 704.5         5.8 +- 0.3    871.0 +- 23.7
+ 40  RL (pbrs_240k, stochastic)      1077.0 +- 107.5      6120.7 +- 549.5         5.7 +- 0.2   1073.0 +- 61.2
+ 40  RL (ckpt_504832, stochastic)    1080.7 +- 113.2      5885.5 +- 659.4         5.4 +- 0.1   1069.3 +- 55.9
+ 40  RL (ckpt_649216, stochastic)    1056.7 +- 115.0      5838.6 +- 647.3         5.5 +- 0.2   1093.3 +- 54.7
+ 40  RL (ckpt_716800, stochastic)    1065.7 +- 117.5      6027.6 +- 585.0         5.7 +- 0.2   1084.3 +- 64.7
+ 40  RL (ckpt_769024, stochastic)    1077.0 +- 113.8      6104.5 +- 605.7         5.7 +- 0.3   1073.0 +- 68.3
+ 40  RL (ckpt_787456, stochastic)    1081.3 +- 112.0      6088.3 +- 578.9         5.6 +- 0.2   1068.7 +- 71.0
+ 48  RL (pbrs_240k, stochastic)      1316.0 +- 116.4      7602.5 +- 452.4         5.8 +- 0.3  1283.3 +- 166.2
+ 48  RL (ckpt_504832, stochastic)    1317.3 +- 118.8      7339.4 +- 568.5         5.6 +- 0.3  1282.0 +- 170.2
+ 48  RL (ckpt_649216, stochastic)    1293.7 +- 117.2      7392.5 +- 523.1         5.7 +- 0.3  1305.7 +- 169.4
+ 48  RL (ckpt_716800, stochastic)     1315.0 +- 94.7      7611.7 +- 390.9         5.8 +- 0.2  1284.3 +- 143.7
+ 48  RL (ckpt_769024, stochastic)    1324.3 +- 118.0      7650.9 +- 489.1         5.8 +- 0.3  1275.0 +- 168.9
+ 48  RL (ckpt_787456, stochastic)    1326.3 +- 100.1      7631.9 +- 437.4         5.8 +- 0.2  1273.0 +- 150.4
+results: /root/Orbi.tar/experiments/benchmarks/benchmark_20261117_145214
+end 2026-11-17T15:40:13+00:00 exit=0

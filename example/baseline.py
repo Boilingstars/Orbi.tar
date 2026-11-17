@@ -20,10 +20,12 @@ Methods:
   `scipy.optimize.linear_sum_assignment` with idle columns. The downlink cap is
   enforced by a deterministic repair, so it is not an exact solution of the capped
   problem and it is not a whole-shift plan.
-- RL: a trained MaskablePPO checkpoint, no training or fine-tuning here. On N < 48
-  it is a zero-shot transfer of a policy trained on 48 satellites.
+- RL: one or more trained MaskablePPO checkpoints, no training or fine-tuning.
+  On N < 48 it is a zero-shot transfer of a policy trained on 48 satellites.
+  Each checkpoint is a separate method so they can be compared on the same tape.
 
     python -m example.baseline --model PATH_TO_MODEL.zip
+    python -m example.baseline --model A.zip --model B.zip --model C.zip --smoke
     python -m example.baseline --model PATH.zip --fleet-sizes 16,24,32,40,48 --seeds 0:29 \\
         --event-mode common --rl-mode stochastic --output experiments/benchmarks
 """
@@ -112,6 +114,19 @@ METHOD_STYLE = {
     RL_STOCHASTIC: ("#2ca02c", "^"),
     RL_DETERMINISTIC: ("#2ca02c", "v"),
 }
+_RL_PALETTE = (
+    ("#2ca02c", "^"),
+    ("#17becf", "D"),
+    ("#9467bd", "P"),
+    ("#8c564b", "X"),
+    ("#e377c2", "v"),
+    ("#bcbd22", "h"),
+)
+
+# One worker's RSS: Torch/SB3 ~250 MB, each extra checkpoint ~25 MB, one P03 env ~50 MB.
+_WORKER_BASE_MB = 350
+_WORKER_MODEL_MB = 30
+_WORKER_RESERVE_MB = 1024
 
 KINDS = ("relay", "downlink")
 EVENT_MODES = ("common", "native")
@@ -194,12 +209,24 @@ DELTA_METRICS = (
 )
 
 
+@dataclass(frozen=True)
+class RLEntry:
+    """One checkpoint as a pair of RL method names (stochastic and deterministic)."""
+
+    path: str
+    label: str
+    method: str
+    det_method: str
+
+
 @dataclass
 class Options:
     """One benchmark launch. `parse` fills it from the command line."""
 
     scenario: str = SCENARIO
     model: str | None = MODEL
+    models: tuple[str, ...] = ()
+    model_labels: tuple[str, ...] = ()
     fleet_sizes: tuple[int, ...] = FLEET_SIZES
     seeds: tuple[int, ...] = tuple(range(30))
     event_modes: tuple[str, ...] = ("common",)
@@ -214,9 +241,35 @@ class Options:
     # Tests only. A benchmark run always plays the whole shift.
     max_steps: int | None = None
 
+    def model_list(self) -> tuple[str, ...]:
+        if self.models:
+            return self.models
+        if self.model:
+            return (self.model,)
+        return ()
+
     @property
     def primary_rl(self) -> str:
-        return RL_METHODS[self.rl_mode]
+        entries = self.rl_entries()
+        if not entries:
+            return RL_METHODS[self.rl_mode]
+        return entries[0].det_method if self.rl_mode == "deterministic" else entries[0].method
+
+    def rl_entries(self) -> list[RLEntry]:
+        paths = self.model_list()
+        if not paths:
+            return []
+        labels = _unique_labels(paths, self.model_labels)
+        named = len(paths) > 1 or any(self.model_labels)
+        entries = []
+        for path, label in zip(paths, labels):
+            if named:
+                method = f"RL_{label}"
+                det = f"RL_{label}_det"
+            else:
+                method, det = RL_STOCHASTIC, RL_DETERMINISTIC
+            entries.append(RLEntry(path=path, label=label, method=method, det_method=det))
+        return entries
 
     def method_names(self) -> list[str]:
         names = []
@@ -226,11 +279,100 @@ class Options:
         if "hungarian" in self.methods:
             names.append(HUNGARIAN)
 
-        if "rl" in self.methods:
-            names.append(self.primary_rl)
+        if "rl" not in self.methods:
+            return names
+        for entry in self.rl_entries():
+            names.append(entry.det_method if self.rl_mode == "deterministic" else entry.method)
             if self.rl_secondary:
-                names.extend(name for name in RL_METHODS.values() if name != self.primary_rl)
+                names.append(entry.method if self.rl_mode == "deterministic" else entry.det_method)
         return names
+
+
+def _is_rl_method(name: str) -> bool:
+    return name in RL_METHODS.values() or name.startswith("RL_")
+
+
+def _sanitize_label(text: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", text).strip("_")
+    return cleaned or "model"
+
+
+def _default_model_label(path: str) -> str:
+    p = Path(path)
+    if p.name.lower() == "model.zip" and p.parent.name:
+        folder = p.parent.parent if p.parent.name == "checkpoints" else p.parent
+        source = folder.name
+    else:
+        source = p.stem
+    rest = re.sub(r"^\d{1,2}_\d{1,2}_\d{2}_", "", source)
+    rest = re.sub(r"^reward_", "", rest)
+    return _sanitize_label(rest or source or "model")
+
+
+def _unique_labels(paths: tuple[str, ...], given: tuple[str, ...]) -> list[str]:
+    labels = []
+    seen: dict[str, int] = {}
+    for i, path in enumerate(paths):
+        raw = given[i] if i < len(given) and given[i] else _default_model_label(path)
+        label = _sanitize_label(raw)
+        count = seen.get(label, 0) + 1
+        seen[label] = count
+        labels.append(label if count == 1 else f"{label}_{count}")
+    return labels
+
+
+def method_label(name: str) -> str:
+    if name in METHOD_LABELS:
+        return METHOD_LABELS[name]
+    det = name == RL_DETERMINISTIC or name.endswith("_det")
+    core = name[3:] if name.startswith("RL_") else name
+    if core.endswith("_det"):
+        core = core[:-4]
+    mode = "deterministic" if det else "stochastic"
+    return f"RL ({core}, {mode})"
+
+
+def method_style(name: str, rl_index: int = 0) -> tuple[str, str]:
+    if name in METHOD_STYLE:
+        return METHOD_STYLE[name]
+    return _RL_PALETTE[rl_index % len(_RL_PALETTE)]
+
+
+def _cpu_count() -> int:
+    return os.cpu_count() or 1
+
+
+def _mem_available_mb() -> int | None:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) // 1024
+    except Exception:
+        return None
+    return None
+
+
+def _worker_mb(n_models: int) -> int:
+    extra = max(int(n_models) - 1, 0) * _WORKER_MODEL_MB
+    return _WORKER_BASE_MB + extra
+
+
+def resolve_workers(requested: int, n_tasks: int, n_models: int) -> tuple[int, str]:
+    """Pick a process count. `requested` <= 0 means auto from CPU, RAM, and task count."""
+    cpu = _cpu_count()
+    mem = _mem_available_mb()
+    n_tasks = max(int(n_tasks), 1)
+    if requested > 0:
+        n = max(1, min(int(requested), n_tasks))
+        return n, f"requested {requested}, cpu={cpu}"
+    per = _worker_mb(n_models)
+    by_cpu = max(1, cpu - 1) if cpu > 1 else 1
+    if mem is None:
+        n = max(1, min(by_cpu, n_tasks))
+        return n, f"auto cpu={cpu} (no MemAvailable), {n_models} models"
+    by_ram = max(1, (mem - _WORKER_RESERVE_MB) // per)
+    n = max(1, min(by_ram, by_cpu, n_tasks))
+    return n, f"auto cpu={cpu} mem_available={mem}MB per_worker~{per}MB models={n_models}"
 
 
 def run_benchmark(opts: Options) -> Path:
@@ -239,39 +381,57 @@ def run_benchmark(opts: Options) -> Path:
     out_dir = _run_dir(opts)
     base = load(resolve_scenario(opts.scenario))
 
-    # The checkpoint is checked once here. Workers only load the same file.
-    model = None
-    model_info = None
-    if any(name in RL_METHODS.values() for name in opts.method_names()):
-        model, model_info = load_policy(opts.model, base)
+    # Checkpoints are checked once here. A process pool reloads them in each worker.
+    models: dict = {}
+    model_infos: list[dict] = []
+    if any(_is_rl_method(name) for name in opts.method_names()):
+        models, model_infos = load_policies(opts, base)
+
     if opts.into:
         previous = out_dir / "config_before_update.json"
         current = out_dir / "config.json"
         if current.is_file() and not previous.exists():
             previous.write_bytes(current.read_bytes())
-    config = _config(opts, base, model_info)
-    _write_json(out_dir / "config.json", config)
 
     # One task is one (event mode, N, seed): the tape, then each method on it.
     tasks = [(mode, n, seed) for mode in opts.event_modes for n in opts.fleet_sizes for seed in opts.seeds]
+    workers, worker_note = resolve_workers(opts.workers, len(tasks), len(opts.model_list()))
+    opts = replace(opts, workers=workers)
+    shared = models if workers <= 1 else None
+    if workers > 1:
+        models.clear()
+    config = _config(opts, base, model_infos)
+    _write_json(out_dir / "config.json", config)
     played = set(opts.method_names())
     rows: list[dict] = _kept_rows(out_dir, played) if opts.into else []
     tapes: list[dict] = []
     started = time.perf_counter()
-    print(f"benchmark: {len(tasks)} tasks x {len(opts.method_names())} methods -> {out_dir}", flush=True)
-    for done, result in enumerate(_execute(opts, tasks, model), start=1):
+    n_methods = len(opts.method_names())
+    print(
+        f"benchmark: {len(tasks)} tasks x {n_methods} methods, {workers} workers ({worker_note}) -> {out_dir}",
+        flush=True,
+    )
+    for done, result in enumerate(_execute(opts, tasks, shared), start=1):
         rows.extend(result["rows"])
         if result["tape"] is not None:
             tapes.append(result["tape"])
-        _write_csv(out_dir / "episodes.csv", _sorted_rows(rows))
+        _write_csv(out_dir / "episodes.csv", _sorted_rows(rows, opts.method_names()))
         mode, n, seed = result["task"]
         elapsed = time.perf_counter() - started
-        print(f"  [{done}/{len(tasks)}] {mode} N={n} seed={seed} done, {elapsed / 60:.1f} min", flush=True)
+        remaining = len(tasks) - done
+        eta = (elapsed / done) * remaining if done else 0.0
+        method_bit = " ".join(f"{name}={secs:.1f}s" for name, secs in result.get("method_s", {}).items())
+        print(
+            f"  [{done}/{len(tasks)}] {mode} N={n} seed={seed} task={result.get('elapsed_s', 0.0):.1f}s"
+            f"{' ' + method_bit if method_bit else ''}  elapsed {elapsed / 60:.1f} min  ETA {eta / 60:.1f} min"
+            f"  remaining {remaining}",
+            flush=True,
+        )
 
     # Aggregates over seeds, the paired differences, and the files around them.
-    rows = _sorted_rows(rows)
+    rows = _sorted_rows(rows, opts.method_names())
     report_opts = _report_options(opts, rows)
-    config = _config(report_opts, base, model_info)
+    config = _config(report_opts, base, model_infos)
     summary = summarize(rows)
     deltas = paired_deltas(rows, report_opts)
     _write_csv(out_dir / "summary.csv", summary)
@@ -293,10 +453,11 @@ def _check_options(opts: Options) -> None:
     if not opts.method_names():
         raise SystemExit("No methods selected")
 
-    if "rl" in opts.methods and not opts.model:
+    if "rl" in opts.methods and not opts.model_list():
         raise SystemExit(
             "RL needs a trained checkpoint: pass --model PATH_TO_MODEL.zip "
-            "(or run only the classical methods with --methods greedy,hungarian)"
+            "(repeat --model for several checkpoints, or run only the classical "
+            "methods with --methods greedy,hungarian)"
         )
 
     if any(mode not in EVENT_MODES for mode in opts.event_modes):
@@ -370,16 +531,18 @@ def _report_options(opts: Options, rows: list[dict]) -> Options:
         methods.append("greedy")
     if HUNGARIAN in names:
         methods.append("hungarian")
-    if names & set(RL_METHODS.values()):
+    if any(_is_rl_method(name) for name in names):
         methods.append("rl")
-    secondary = RL_STOCHASTIC in names and RL_DETERMINISTIC in names
+    secondary = any(name.endswith("_det") or name == RL_DETERMINISTIC for name in names) and any(
+        _is_rl_method(name) and name != RL_DETERMINISTIC and not name.endswith("_det") for name in names
+    )
     return replace(opts, methods=tuple(methods) or opts.methods, rl_secondary=secondary)
 
 
-def _execute(opts: Options, tasks: list[tuple], model):
+def _execute(opts: Options, tasks: list[tuple], models: dict | None):
     """Yield task results in completion order. One worker runs in this process."""
     if opts.workers <= 1:
-        _init_worker(opts, model)
+        _init_worker(opts, models)
         for task in tasks:
             yield _run_task(task)
         return
@@ -394,17 +557,44 @@ def _execute(opts: Options, tasks: list[tuple], model):
 _WORKER: dict = {}
 
 
-def _init_worker(opts: Options, model=None) -> None:
+def _init_worker(opts: Options, models=None) -> None:
     # One BLAS thread per worker keeps timings comparable and seeds reproducible.
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    needs_rl = any(name in RL_METHODS.values() for name in opts.method_names())
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    needs_rl = any(_is_rl_method(name) for name in opts.method_names())
     if needs_rl:
         import torch
 
         torch.set_num_threads(1)
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass
     _WORKER["opts"] = opts
     _WORKER["base"] = load(resolve_scenario(opts.scenario))
-    _WORKER["model"] = model if model is not None or not needs_rl else load_ppo(opts.model)
+    if models is not None:
+        _WORKER["models"] = models
+        return
+
+    if not needs_rl:
+        _WORKER["models"] = {}
+        return
+    _WORKER["models"] = _load_worker_models(opts)
+
+
+def _load_worker_models(opts: Options) -> dict:
+    """One loaded policy per checkpoint, keyed by every RL method name that uses it."""
+    loaded: dict[str, object] = {}
+    models: dict[str, object] = {}
+    for entry in opts.rl_entries():
+        path = str(Path(entry.path).resolve())
+        if path not in loaded:
+            print(f"worker pid={os.getpid()} loading {entry.label or path}", flush=True)
+            loaded[path] = load_ppo(path)
+        models[entry.method] = loaded[path]
+        models[entry.det_method] = loaded[path]
+    return models
 
 
 def _run_task(task: tuple) -> dict:
@@ -412,12 +602,27 @@ def _run_task(task: tuple) -> dict:
     opts = _WORKER["opts"]
     cfg = fleet_config(_WORKER["base"], n_sats)
     work = Workload.for_fleet(n_sats)
+    t0 = time.perf_counter()
     tape = EventTape.record(cfg, work, seed) if mode == "common" else None
-    rows = [
-        play(make_method(name, _WORKER["model"]), cfg, work, seed, mode, tape, opts.max_steps)
-        for name in opts.method_names()
-    ]
-    return {"task": task, "rows": rows, "tape": tape.summary() if tape is not None else None}
+    tape_s = time.perf_counter() - t0
+    if tape is not None:
+        print(f"    {mode} N={n_sats} seed={seed} tape {tape_s:.1f}s", flush=True)
+    rows = []
+    method_s: dict[str, float] = {}
+    for name in opts.method_names():
+        started = time.perf_counter()
+        row = play(make_method(name, _WORKER["models"]), cfg, work, seed, mode, tape, opts.max_steps)
+        dt = time.perf_counter() - started
+        method_s[name] = dt
+        rows.append(row)
+        print(f"    {mode} N={n_sats} seed={seed} {name} {dt:.1f}s", flush=True)
+    return {
+        "task": task,
+        "rows": rows,
+        "tape": tape.summary() if tape is not None else None,
+        "elapsed_s": time.perf_counter() - t0,
+        "method_s": method_s,
+    }
 
 
 @dataclass(frozen=True)
@@ -812,8 +1017,8 @@ def _assign(weights: np.ndarray, rows: list[int], cols: list[int]) -> dict[int, 
 class RLMethod:
     """A loaded MaskablePPO policy through `PPOAgent`. Stochastic sampling gets its own seed."""
 
-    def __init__(self, model, deterministic: bool) -> None:
-        self.name = RL_DETERMINISTIC if deterministic else RL_STOCHASTIC
+    def __init__(self, model, deterministic: bool, name: str | None = None) -> None:
+        self.name = name or (RL_DETERMINISTIC if deterministic else RL_STOCHASTIC)
         self.deterministic = bool(deterministic)
         self.agent = PPOAgent(model, name=self.name, deterministic=deterministic)
         self.device = str(getattr(model, "device", "cpu"))
@@ -847,11 +1052,13 @@ def make_method(name: str, model=None):
     if name == HUNGARIAN:
         return HungarianMethod()
 
-    if name in RL_METHODS.values():
-        if model is None:
-            raise SystemExit(f"{name} needs --model")
-        return RLMethod(model, deterministic=name == RL_DETERMINISTIC)
-    raise ValueError(f"unknown method {name}")
+    if not _is_rl_method(name):
+        raise ValueError(f"unknown method {name}")
+    loaded = model.get(name) if isinstance(model, dict) else model
+    if loaded is None:
+        raise SystemExit(f"{name} needs --model")
+    det = name == RL_DETERMINISTIC or name.endswith("_det")
+    return RLMethod(loaded, deterministic=det, name=name)
 
 
 def load_policy(path: str | None, base: dict) -> tuple[object, dict]:
@@ -864,6 +1071,23 @@ def load_policy(path: str | None, base: dict) -> tuple[object, dict]:
     model = load_ppo(model_path)
     info = check_checkpoint(model, model_path, base)
     return model, info
+
+
+def load_policies(opts: Options, base: dict) -> tuple[dict, list[dict]]:
+    """Load every checkpoint once. Method names that share a path share the object."""
+    by_path: dict[str, object] = {}
+    infos: list[dict] = []
+    models: dict[str, object] = {}
+    for entry in opts.rl_entries():
+        path = str(Path(entry.path).resolve())
+        if path not in by_path:
+            model, info = load_policy(entry.path, base)
+            info["label"] = entry.label
+            by_path[path] = model
+            infos.append(info)
+        models[entry.method] = by_path[path]
+        models[entry.det_method] = by_path[path]
+    return models, infos
 
 
 def check_checkpoint(model, model_path: Path, base: dict) -> dict:
@@ -973,7 +1197,7 @@ def play(method, cfg: dict, work: Workload, seed: int, mode: str, tape: EventTap
         "n_sats": work.n_sats,
         "seed": int(seed),
         "method": method.name,
-        "method_label": METHOD_LABELS[method.name],
+        "method_label": method_label(method.name),
         "tape_hash": tape.tape_hash if tape is not None else None,
     }
     row.update(probe.after_reset)
@@ -1211,10 +1435,13 @@ def summarize(rows: list[dict]) -> list[dict]:
 def paired_deltas(rows: list[dict], opts: Options) -> list[dict]:
     """Per-seed differences A - B inside one (event mode, N), with a paired bootstrap CI."""
     names = opts.method_names()
-    rl_names = [name for name in names if name in RL_METHODS.values()]
+    rl_names = [name for name in names if _is_rl_method(name)]
     pairs = [(rl, other) for rl in rl_names for other in (GREEDY, HUNGARIAN) if other in names]
     if HUNGARIAN in names and GREEDY in names:
         pairs.append((HUNGARIAN, GREEDY))
+    for i, left in enumerate(rl_names):
+        for right in rl_names[i + 1 :]:
+            pairs.append((left, right))
     index = {(row["event_mode"], row["n_sats"], row["method"], row["seed"]): row for row in rows}
     rng = np.random.default_rng(BOOTSTRAP_SEED)
 
@@ -1236,7 +1463,7 @@ def paired_deltas(rows: list[dict], opts: Options) -> list[dict]:
                             "event_mode": mode,
                             "n_sats": n,
                             "comparison": f"{a} - {b}",
-                            "role": "primary" if a in (opts.primary_rl, HUNGARIAN) else "supplementary",
+                            "role": "primary" if a in (opts.primary_rl, HUNGARIAN) or _is_rl_method(b) else "supplementary",
                             "metric": metric,
                             **_paired(np.asarray(deltas), rng),
                             "preliminary": len(deltas) < PRELIMINARY_SEEDS,
@@ -1269,13 +1496,23 @@ def _finite(value) -> bool:
     return value is not None and value != "" and math.isfinite(float(value))
 
 
-def _method_rank(name: str) -> int:
+def _method_rank(name: str, methods: list[str] | None = None) -> int:
+    if methods and name in methods:
+        return methods.index(name)
     order = [GREEDY, HUNGARIAN, RL_STOCHASTIC, RL_DETERMINISTIC]
     return order.index(name) if name in order else len(order)
 
 
-def _sorted_rows(rows: list[dict]) -> list[dict]:
-    return sorted(rows, key=lambda r: (EVENT_MODES.index(r["event_mode"]), r["n_sats"], r["seed"], _method_rank(r["method"])))
+def _sorted_rows(rows: list[dict], methods: list[str] | None = None) -> list[dict]:
+    return sorted(
+        rows,
+        key=lambda r: (
+            EVENT_MODES.index(r["event_mode"]) if r["event_mode"] in EVENT_MODES else 99,
+            r["n_sats"],
+            r["seed"],
+            _method_rank(r["method"], methods),
+        ),
+    )
 
 
 def build_report(opts: Options, config: dict, rows: list[dict], summary: list[dict], deltas: list[dict], tapes: list[dict]) -> dict:
@@ -1287,7 +1524,7 @@ def build_report(opts: Options, config: dict, rows: list[dict], summary: list[di
             "event_mode": mode,
             "n_sats": n,
             "method": method,
-            "label": METHOD_LABELS[method],
+            "label": method_label(method),
             **{metric: _stats_only(lookup.get((mode, n, method, metric))) for metric in MAIN_METRICS},
         }
         for mode in opts.event_modes
@@ -1295,7 +1532,7 @@ def build_report(opts: Options, config: dict, rows: list[dict], summary: list[di
         for method in opts.method_names()
     ]
     return {
-        "title": "Greedy vs Hungarian + capacity repair vs RL (MaskablePPO) on P03 fleet subsets",
+        "title": "Greedy vs Hungarian + capacity repair vs RL checkpoints on P03 fleet subsets",
         "created": datetime.now().isoformat(timespec="seconds"),
         "status": "preliminary" if preliminary else "final",
         "n_seeds": len(opts.seeds),
@@ -1304,7 +1541,7 @@ def build_report(opts: Options, config: dict, rows: list[dict], summary: list[di
         "primary_event_mode": opts.event_modes[0],
         "event_modes": list(opts.event_modes),
         "primary_rl_mode": opts.primary_rl if "rl" in opts.methods else None,
-        "methods": {name: METHOD_LABELS[name] for name in opts.method_names()},
+        "methods": {name: method_label(name) for name in opts.method_names()},
         "notes": _notes(opts),
         "metric_definitions": {
             "completed": "completed_step is set and completed_step <= deadline_step",
@@ -1320,7 +1557,7 @@ def build_report(opts: Options, config: dict, rows: list[dict], summary: list[di
             "ci95": "t-interval of the mean over seeds; paired deltas use a percentile bootstrap over seeds",
         },
         "hungarian": {
-            "label": METHOD_LABELS[HUNGARIAN],
+            "label": method_label(HUNGARIAN),
             "weight": "w_ij = value_usd_j / T_ij + 1e-4 * soc_i + 1e-3 * [i executed j last tick]",
             "T_ij": "relay: remaining_steps; downlink: remaining_steps for the current holder, else work_steps",
             "tie_soc": HUNGARIAN_TIE_SOC,
@@ -1333,7 +1570,7 @@ def build_report(opts: Options, config: dict, rows: list[dict], summary: list[di
         },
         "checks": integrity_checks(opts, rows, tapes),
         "timing": {
-            "device": (config.get("model") or {}).get("device", "cpu"),
+            "device": _timing_device(config),
             "workers": opts.workers,
             "torch_threads_per_worker": 1,
             "method": "time.perf_counter around the method call; RL includes tensor conversion and decoding, Hungarian includes building its tick view",
@@ -1361,10 +1598,17 @@ def _notes(opts: Options) -> list[str]:
         "Greedy reads env.downlink_limit on every tick after reset (n_sats // 8), not the scenario's initial value.",
     ]
     if "rl" in opts.methods:
+        entries = opts.rl_entries()
         notes.append(
             f"Primary RL mode is {opts.primary_rl}, fixed before the run."
             + (" The other mode is supplementary." if opts.rl_secondary else "")
         )
+        if len(entries) > 1:
+            notes.append(
+                "RL checkpoints compared on the same tapes: "
+                + ", ".join(f"{entry.label} ({Path(entry.path).name})" for entry in entries)
+                + "."
+            )
         notes.append("RL was trained on 48 satellites; N < 48 is zero-shot transfer, so a drop there may come from the shifted observation distribution.")
     if len(opts.seeds) < PRELIMINARY_SEEDS:
         notes.append(f"Only {len(opts.seeds)} seeds: all tables and plots are preliminary.")
@@ -1473,7 +1717,7 @@ def plot_all(summary: list[dict], opts: Options, mode: str, out_dir: Path) -> li
 
     out_dir.mkdir(parents=True, exist_ok=True)
     lookup = {(s["n_sats"], s["method"], s["metric"]): s for s in summary if s["event_mode"] == mode}
-    methods = [name for name in opts.method_names() if name in (GREEDY, HUNGARIAN, opts.primary_rl)]
+    methods = _plot_methods(opts)
     tag = f"event mode: {mode}, {len(opts.seeds)} seeds" + (", PRELIMINARY" if len(opts.seeds) < PRELIMINARY_SEEDS else "")
     figures = [
         ("completed_tasks.png", "Completed jobs per shift", "Completed jobs",
@@ -1492,7 +1736,7 @@ def plot_all(summary: list[dict], opts: Options, mode: str, out_dir: Path) -> li
         fig, axes = plt.subplots(1, len(panels), figsize=(max(4.6 * len(panels) + 0.6, 7.5), 4.6), squeeze=False)
         for ax, (metric, panel_title) in zip(axes[0], panels):
             for j, method in enumerate(methods):
-                color, marker = METHOD_STYLE[method]
+                color, marker = method_style(method, j)
                 offset = (j - (len(methods) - 1) / 2) * spread / max(len(methods), 1)
                 xs, ys, lo, hi = [], [], [], []
                 for n in sizes:
@@ -1504,7 +1748,7 @@ def plot_all(summary: list[dict], opts: Options, mode: str, out_dir: Path) -> li
                     lo.append(s["mean"] - s["ci95_low"] if s["ci95_low"] is not None else 0.0)
                     hi.append(s["ci95_high"] - s["mean"] if s["ci95_high"] is not None else 0.0)
                 if xs:
-                    ax.errorbar(xs, ys, yerr=[lo, hi], color=color, marker=marker, capsize=3, linewidth=1.6, markersize=6, label=METHOD_LABELS[method])
+                    ax.errorbar(xs, ys, yerr=[lo, hi], color=color, marker=marker, capsize=3, linewidth=1.6, markersize=6, label=method_label(method))
             ax.set_xticks(sizes)
             ax.set_xlabel("Satellites in the fleet, N")
             ax.set_ylabel(ylabel)
@@ -1533,7 +1777,7 @@ def print_table(summary: list[dict], opts: Options) -> None:
         for n in opts.fleet_sizes:
             for method in opts.method_names():
                 cells = [_cell(lookup.get((mode, n, method, metric))) for metric in MAIN_METRICS]
-                print(f"{n:>3}  {METHOD_LABELS[method]:<30} {cells[0]:>16} {cells[1]:>20} {cells[2]:>18} {cells[3]:>16}")
+                print(f"{n:>3}  {method_label(method):<30} {cells[0]:>16} {cells[1]:>20} {cells[2]:>18} {cells[3]:>16}")
 
 
 def _cell(stats: dict | None) -> str:
@@ -1545,7 +1789,33 @@ def _cell(stats: dict | None) -> str:
     return f"{stats['mean']:.1f} +- {stats['ci95_high'] - stats['mean']:.1f}"
 
 
-def _config(opts: Options, base: dict, model_info: dict | None) -> dict:
+def _plot_methods(opts: Options) -> list[str]:
+    """Greedy, Hungarian, and every RL method in the primary sampling mode."""
+    names = opts.method_names()
+    plotted = []
+    for name in names:
+        if name in (GREEDY, HUNGARIAN):
+            plotted.append(name)
+            continue
+
+        if not _is_rl_method(name):
+            continue
+
+        det = name == RL_DETERMINISTIC or name.endswith("_det")
+        if det == (opts.rl_mode == "deterministic"):
+            plotted.append(name)
+    return plotted
+
+
+def _timing_device(config: dict) -> str:
+    infos = config.get("models")
+    if isinstance(infos, list) and infos:
+        return infos[0].get("device", "cpu")
+    info = config.get("model") or {}
+    return info.get("device", "cpu")
+
+
+def _config(opts: Options, base: dict, model_info) -> dict:
     planes = plane_index(base["satellites"])
     fleets = {}
     for n in opts.fleet_sizes:
@@ -1581,11 +1851,13 @@ def _config(opts: Options, base: dict, model_info: dict | None) -> dict:
         "shift_settings": shift_kwargs(Eval(scenario=SCENARIO, top_k=TOP_K)),
         "workload": {str(n): asdict(Workload.for_fleet(n)) for n in opts.fleet_sizes},
         "fleets": fleets,
-        "model": model_info,
+        "models": model_info if isinstance(model_info, list) else ([model_info] if model_info else []),
+        "model": (model_info[0] if isinstance(model_info, list) and model_info else model_info),
         "host": {
             "python": sys.version.split()[0],
             "platform": platform.platform(),
             "cpu_count": os.cpu_count(),
+            "mem_available_mb": _mem_available_mb(),
             "load_average": list(os.getloadavg()) if hasattr(os, "getloadavg") else None,
         },
         "versions": _versions(),
@@ -1655,7 +1927,12 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def parse(argv: list[str] | None = None) -> Options:
     parser = argparse.ArgumentParser(description="Greedy vs Hungarian + capacity repair vs RL on P03 fleet subsets")
     parser.add_argument("--scenario", default=SCENARIO)
-    parser.add_argument("--model", default=MODEL, help="trained MaskablePPO checkpoint (.zip); required for RL")
+    parser.add_argument(
+        "--model",
+        action="append",
+        default=None,
+        help="trained MaskablePPO checkpoint (.zip). Repeat for several. Optional PATH:label",
+    )
     parser.add_argument("--fleet-sizes", default=",".join(map(str, FLEET_SIZES)))
     parser.add_argument("--seeds", default="0:29", help="inclusive range a:b, or a comma list")
     parser.add_argument("--event-mode", default="common", choices=["common", "native", "both"])
@@ -1664,7 +1941,11 @@ def parse(argv: list[str] | None = None) -> Options:
     parser.add_argument("--methods", default="greedy,hungarian,rl", help="subset of greedy,hungarian,rl")
     parser.add_argument("--output", default=str(OUTPUT))
     parser.add_argument("--into", default=None, help="update this existing benchmark_* directory instead of creating a new one")
-    parser.add_argument("--workers", type=int, default=1, help="parallel processes, one (event mode, N, seed) each")
+    parser.add_argument(
+        "--workers",
+        default="auto",
+        help="parallel processes, one (event mode, N, seed) each; auto sizes from CPU and RAM",
+    )
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--smoke", action="store_true", help="seeds 0,1,2; results are marked preliminary")
     args = parser.parse_args(argv)
@@ -1674,9 +1955,13 @@ def parse(argv: list[str] | None = None) -> Options:
     if unknown:
         parser.error(f"unknown methods: {sorted(unknown)}")
     sizes = tuple(int(x) for x in args.fleet_sizes.split(",") if x.strip())
+    specs = args.model if args.model else ([MODEL] if MODEL else [])
+    paths, labels = _parse_model_specs(specs)
     opts = Options(
         scenario=args.scenario,
-        model=args.model,
+        model=paths[0] if paths else None,
+        models=tuple(paths),
+        model_labels=tuple(labels),
         fleet_sizes=sizes,
         seeds=(0, 1, 2) if args.smoke else _seeds(args.seeds),
         event_modes=EVENT_MODES if args.event_mode == "both" else (args.event_mode,),
@@ -1685,11 +1970,39 @@ def parse(argv: list[str] | None = None) -> Options:
         methods=methods,
         output=args.output,
         into=args.into,
-        workers=max(int(args.workers), 1),
+        workers=_parse_workers(args.workers),
         plots=not args.no_plots,
         smoke=args.smoke,
     )
     return opts
+
+
+def _parse_model_specs(specs: list[str]) -> tuple[list[str], list[str]]:
+    paths, labels = [], []
+    for spec in specs:
+        path, label = _split_model_spec(spec)
+        paths.append(path)
+        labels.append(label or "")
+    return paths, labels
+
+
+def _split_model_spec(spec: str) -> tuple[str, str | None]:
+    """`PATH` or `PATH:label`. A label has no slashes and is not a .zip suffix."""
+    if ":" not in spec:
+        return spec, None
+    path, label = spec.rsplit(":", 1)
+    if not path or "/" in label or "\\" in label or label.endswith(".zip"):
+        return spec, None
+    return path, label
+
+
+def _parse_workers(text) -> int:
+    if text is None:
+        return 0
+    raw = str(text).strip().lower()
+    if raw in ("auto", "0", ""):
+        return 0
+    return max(int(raw), 0)
 
 
 def _seeds(text: str) -> tuple[int, ...]:

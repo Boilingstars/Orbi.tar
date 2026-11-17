@@ -1,0 +1,160 @@
+log=/root/Orbi.tar/experiments/benchmarks/baseline_pbrs_3ckpt_20261117_114550.log
+start 2026-11-17T11:45:50+00:00
+nproc=1
+               total        used        free      shared  buff/cache   available
+Mem:           5.8Gi       992Mi       4.4Gi        19Mi       668Mi       4.8Gi
+Swap:          4.0Gi          0B       4.0Gi
+load 0.72 0.65 0.43 1/268 6400
+---
+benchmark: 15 tasks x 5 methods, 5 workers (auto cpu=6 mem_available=4555MB per_worker~410MB models=3) -> /root/Orbi.tar/experiments/benchmarks/benchmark_20261117_114553
+worker pid=6441 loading pbrs_240k
+worker pid=6444 loading pbrs_240k
+worker pid=6440 loading pbrs_240k
+worker pid=6443 loading pbrs_240k
+worker pid=6442 loading pbrs_240k
+worker pid=6444 loading pbrs_500k
+worker pid=6442 loading pbrs_500k
+worker pid=6441 loading pbrs_500k
+worker pid=6443 loading pbrs_500k
+worker pid=6444 loading pbrs_880k
+worker pid=6442 loading pbrs_880k
+worker pid=6440 loading pbrs_500k
+worker pid=6441 loading pbrs_880k
+worker pid=6443 loading pbrs_880k
+worker pid=6440 loading pbrs_880k
+    common N=16 seed=2 tape 12.6s
+    common N=16 seed=0 tape 13.9s
+    common N=16 seed=1 tape 15.5s
+    common N=24 seed=1 tape 26.3s
+    common N=24 seed=0 tape 26.6s
+    common N=16 seed=2 Greedy 48.9s
+    common N=16 seed=0 Greedy 48.7s
+    common N=16 seed=1 Greedy 47.6s
+    common N=24 seed=1 Greedy 72.3s
+    common N=24 seed=0 Greedy 79.3s
+    common N=16 seed=1 Hungarian 49.9s
+    common N=16 seed=2 Hungarian 52.2s
+    common N=16 seed=0 Hungarian 51.2s
+    common N=24 seed=1 Hungarian 77.0s
+    common N=16 seed=1 RL_pbrs_240k 70.1s
+    common N=16 seed=2 RL_pbrs_240k 72.8s
+    common N=24 seed=0 Hungarian 81.1s
+    common N=16 seed=0 RL_pbrs_240k 79.8s
+    common N=16 seed=1 RL_pbrs_500k 72.1s
+    common N=16 seed=2 RL_pbrs_500k 73.9s
+    common N=16 seed=0 RL_pbrs_500k 77.5s
+    common N=24 seed=1 RL_pbrs_240k 102.7s
+    common N=24 seed=0 RL_pbrs_240k 110.3s
+    common N=16 seed=1 RL_pbrs_880k 72.1s
+  [1/15] common N=16 seed=1 task=327.3s Greedy=47.6s Hungarian=49.9s RL_pbrs_240k=70.1s RL_pbrs_500k=72.1s RL_pbrs_880k=72.1s  elapsed 5.5 min  ETA 77.4 min  remaining 14
+    common N=16 seed=2 RL_pbrs_880k 72.5s
+  [2/15] common N=16 seed=2 task=333.0s Greedy=48.9s Hungarian=52.2s RL_pbrs_240k=72.8s RL_pbrs_500k=73.9s RL_pbrs_880k=72.5s  elapsed 5.6 min  ETA 36.5 min  remaining 13
+    common N=16 seed=0 RL_pbrs_880k 75.2s
+  [3/15] common N=16 seed=0 task=346.3s Greedy=48.7s Hungarian=51.2s RL_pbrs_240k=79.8s RL_pbrs_500k=77.5s RL_pbrs_880k=75.2s  elapsed 5.8 min  ETA 23.4 min  remaining 12
+    common N=24 seed=2 tape 28.8s
+    common N=24 seed=1 RL_pbrs_500k 98.4s
+    common N=32 seed=0 tape 44.2s
+    common N=32 seed=1 tape 44.6s
+    common N=24 seed=0 RL_pbrs_500k 101.5s
+    common N=24 seed=2 Greedy 75.5s
+    common N=24 seed=1 RL_pbrs_880k 94.7s
+  [4/15] common N=24 seed=1 task=471.4s Greedy=72.3s Hungarian=77.0s RL_pbrs_240k=102.7s RL_pbrs_500k=98.4s RL_pbrs_880k=94.7s  elapsed 7.9 min  ETA 21.8 min  remaining 11
+    common N=32 seed=0 Greedy 117.8s
+    common N=32 seed=1 Greedy 105.2s
+    common N=24 seed=0 RL_pbrs_880k 100.4s
+  [5/15] common N=24 seed=0 task=499.3s Greedy=79.3s Hungarian=81.1s RL_pbrs_240k=110.3s RL_pbrs_500k=101.5s RL_pbrs_880k=100.4s  elapsed 8.4 min  ETA 16.8 min  remaining 10
+    common N=24 seed=2 Hungarian 73.0s
+    common N=32 seed=2 tape 43.3s
+    common N=40 seed=0 tape 60.8s
+    common N=32 seed=1 Hungarian 103.7s
+    common N=24 seed=2 RL_pbrs_240k 96.7s
+    common N=32 seed=0 Hungarian 111.7s
+    common N=32 seed=2 Greedy 104.6s
+    common N=24 seed=2 RL_pbrs_500k 95.3s
+    common N=40 seed=0 Greedy 138.9s
+    common N=32 seed=2 Hungarian 106.5s
+    common N=32 seed=1 RL_pbrs_240k 129.5s
+    common N=32 seed=0 RL_pbrs_240k 132.6s
+    common N=24 seed=2 RL_pbrs_880k 95.7s
+  [6/15] common N=24 seed=2 task=465.1s Greedy=75.5s Hungarian=73.0s RL_pbrs_240k=96.7s RL_pbrs_500k=95.3s RL_pbrs_880k=95.7s  elapsed 13.3 min  ETA 19.9 min  remaining 9
+    common N=40 seed=0 Hungarian 145.4s
+    common N=32 seed=2 RL_pbrs_240k 132.5s
+    common N=32 seed=1 RL_pbrs_500k 130.0s
+    common N=40 seed=1 tape 68.4s
+    common N=32 seed=0 RL_pbrs_500k 136.9s
+    common N=32 seed=2 RL_pbrs_500k 125.8s
+    common N=32 seed=1 RL_pbrs_880k 126.9s
+  [7/15] common N=32 seed=1 task=639.8s Greedy=105.2s Hungarian=103.7s RL_pbrs_240k=129.5s RL_pbrs_500k=130.0s RL_pbrs_880k=126.9s  elapsed 16.5 min  ETA 18.9 min  remaining 8
+    common N=40 seed=1 Greedy 137.8s
+    common N=32 seed=0 RL_pbrs_880k 129.5s
+  [8/15] common N=32 seed=0 task=672.8s Greedy=117.8s Hungarian=111.7s RL_pbrs_240k=132.6s RL_pbrs_500k=136.9s RL_pbrs_880k=129.5s  elapsed 16.8 min  ETA 14.7 min  remaining 7
+    common N=40 seed=0 RL_pbrs_240k 164.6s
+    common N=40 seed=2 tape 59.9s
+    common N=48 seed=0 tape 83.7s
+    common N=32 seed=2 RL_pbrs_880k 133.4s
+  [9/15] common N=32 seed=2 task=646.1s Greedy=104.6s Hungarian=106.5s RL_pbrs_240k=132.5s RL_pbrs_500k=125.8s RL_pbrs_880k=133.4s  elapsed 18.7 min  ETA 12.5 min  remaining 6
+    common N=40 seed=1 Hungarian 141.8s
+    common N=40 seed=0 RL_pbrs_500k 174.5s
+    common N=40 seed=2 Greedy 146.8s
+    common N=48 seed=1 tape 92.4s
+    common N=48 seed=0 Greedy 188.8s
+    common N=40 seed=1 RL_pbrs_240k 164.3s
+    common N=40 seed=2 Hungarian 140.0s
+    common N=40 seed=0 RL_pbrs_880k 171.3s
+  [10/15] common N=40 seed=0 task=855.4s Greedy=138.9s Hungarian=145.4s RL_pbrs_240k=164.6s RL_pbrs_500k=174.5s RL_pbrs_880k=171.3s  elapsed 22.7 min  ETA 11.3 min  remaining 5
+    common N=48 seed=1 Greedy 173.3s
+    common N=48 seed=2 tape 82.2s
+    common N=48 seed=0 Hungarian 183.6s
+    common N=40 seed=1 RL_pbrs_500k 159.8s
+    common N=40 seed=2 RL_pbrs_240k 160.7s
+    common N=48 seed=1 Hungarian 172.3s
+    common N=48 seed=2 Greedy 171.0s
+    common N=40 seed=1 RL_pbrs_880k 162.7s
+  [11/15] common N=40 seed=1 task=834.9s Greedy=137.8s Hungarian=141.8s RL_pbrs_240k=164.3s RL_pbrs_500k=159.8s RL_pbrs_880k=162.7s  elapsed 27.2 min  ETA 9.9 min  remaining 4
+    common N=40 seed=2 RL_pbrs_500k 158.7s
+    common N=48 seed=0 RL_pbrs_240k 206.2s
+    common N=48 seed=1 RL_pbrs_240k 188.0s
+    common N=48 seed=2 Hungarian 166.5s
+    common N=40 seed=2 RL_pbrs_880k 158.4s
+  [12/15] common N=40 seed=2 task=824.5s Greedy=146.8s Hungarian=140.0s RL_pbrs_240k=160.7s RL_pbrs_500k=158.7s RL_pbrs_880k=158.4s  elapsed 30.2 min  ETA 7.6 min  remaining 3
+    common N=48 seed=0 RL_pbrs_500k 200.5s
+    common N=48 seed=1 RL_pbrs_500k 194.5s
+    common N=48 seed=2 RL_pbrs_240k 186.8s
+    common N=48 seed=0 RL_pbrs_880k 209.3s
+  [13/15] common N=48 seed=0 task=1072.0s Greedy=188.8s Hungarian=183.6s RL_pbrs_240k=206.2s RL_pbrs_500k=200.5s RL_pbrs_880k=209.3s  elapsed 34.7 min  ETA 5.3 min  remaining 2
+    common N=48 seed=1 RL_pbrs_880k 193.4s
+  [14/15] common N=48 seed=1 task=1013.9s Greedy=173.3s Hungarian=172.3s RL_pbrs_240k=188.0s RL_pbrs_500k=194.5s RL_pbrs_880k=193.4s  elapsed 35.6 min  ETA 2.5 min  remaining 1
+    common N=48 seed=2 RL_pbrs_500k 194.8s
+    common N=48 seed=2 RL_pbrs_880k 187.9s
+  [15/15] common N=48 seed=2 task=989.0s Greedy=171.0s Hungarian=166.5s RL_pbrs_240k=186.8s RL_pbrs_500k=194.8s RL_pbrs_880k=187.9s  elapsed 39.1 min  ETA 0.0 min  remaining 0
+
+== event mode: common, 3 seeds (PRELIMINARY) ==
+  N  method                                completed         revenue, USD    USD / completed           missed
+-------------------------------------------------------------------------------------------------------------
+ 16  Greedy                            414.0 +- 82.4      2378.5 +- 510.9         5.7 +- 0.1    452.0 +- 15.1
+ 16  Hungarian + capacity repair       426.7 +- 91.9      2449.8 +- 555.2         5.7 +- 0.1    439.3 +- 11.7
+ 16  RL (pbrs_240k, stochastic)        402.7 +- 71.0      2311.4 +- 388.3         5.7 +- 0.1    463.3 +- 24.9
+ 16  RL (pbrs_500k, stochastic)        407.7 +- 76.7      2225.3 +- 538.5         5.5 +- 0.3    458.3 +- 20.1
+ 16  RL (pbrs_880k, stochastic)        407.7 +- 74.5      2338.1 +- 436.8         5.7 +- 0.0    458.3 +- 11.7
+ 24  Greedy                            619.7 +- 36.9      3621.4 +- 203.0         5.8 +- 0.6    667.7 +- 66.5
+ 24  Hungarian + capacity repair       647.3 +- 53.1      3761.2 +- 146.7         5.8 +- 0.6    640.0 +- 80.4
+ 24  RL (pbrs_240k, stochastic)        610.7 +- 46.0      3573.1 +- 215.5         5.9 +- 0.7    676.7 +- 74.2
+ 24  RL (pbrs_500k, stochastic)        617.7 +- 28.8      3436.3 +- 160.7         5.6 +- 0.5    669.7 +- 58.6
+ 24  RL (pbrs_880k, stochastic)        619.3 +- 42.3      3596.7 +- 182.3         5.8 +- 0.7    668.0 +- 70.4
+ 32  Greedy                           851.3 +- 112.0      4907.7 +- 710.9         5.8 +- 0.3    861.0 +- 30.5
+ 32  Hungarian + capacity repair      885.3 +- 115.6      5080.2 +- 743.8         5.7 +- 0.3    827.0 +- 33.4
+ 32  RL (pbrs_240k, stochastic)       838.7 +- 111.8      4876.4 +- 697.9         5.8 +- 0.4    873.7 +- 28.6
+ 32  RL (pbrs_500k, stochastic)       851.3 +- 106.8      4691.7 +- 584.8         5.5 +- 0.3    861.0 +- 23.7
+ 32  RL (pbrs_880k, stochastic)        847.0 +- 95.7      4886.1 +- 610.9         5.8 +- 0.3    865.3 +- 12.5
+ 40  Greedy                          1084.3 +- 123.7      6142.8 +- 797.6         5.7 +- 0.1   1065.7 +- 62.9
+ 40  Hungarian + capacity repair     1133.0 +- 110.4      6403.1 +- 699.9         5.7 +- 0.2   1017.0 +- 55.9
+ 40  RL (pbrs_240k, stochastic)      1077.0 +- 107.5      6120.7 +- 549.5         5.7 +- 0.2   1073.0 +- 61.2
+ 40  RL (pbrs_500k, stochastic)      1081.0 +- 110.6      5867.3 +- 656.7         5.4 +- 0.1   1069.0 +- 64.7
+ 40  RL (pbrs_880k, stochastic)       1081.7 +- 95.5      6098.6 +- 489.5         5.6 +- 0.2   1068.3 +- 69.0
+ 48  Greedy                          1325.0 +- 121.2      7641.5 +- 460.0         5.8 +- 0.3  1274.3 +- 173.0
+ 48  Hungarian + capacity repair     1378.7 +- 111.8      7945.3 +- 474.7         5.8 +- 0.2  1220.7 +- 163.7
+ 48  RL (pbrs_240k, stochastic)      1316.0 +- 116.4      7602.5 +- 452.4         5.8 +- 0.3  1283.3 +- 166.2
+ 48  RL (pbrs_500k, stochastic)      1324.0 +- 120.6      7336.2 +- 530.1         5.5 +- 0.4  1275.3 +- 169.9
+ 48  RL (pbrs_880k, stochastic)      1324.0 +- 105.8      7622.3 +- 334.2         5.8 +- 0.3  1275.3 +- 156.0
+results: /root/Orbi.tar/experiments/benchmarks/benchmark_20261117_114553
+end 2026-11-17T12:25:24+00:00 exit=0
