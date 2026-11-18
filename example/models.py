@@ -37,10 +37,11 @@ _ASIDE = -2.0
 class OpsAttentionNet(nn.Module):
     """Central encoder plus the sequential decoder. `forward` returns per-satellite logits and a value."""
 
-    def __init__(self, sat_dim=SAT_FEATURES, job_dim=JOB_FEATURES, edge_dim=EDGE_FEATURES, global_dim=GLOBAL_FEATURES, d=128, heads=4, blocks=2, ff=512, d_pointer=64):
+    def __init__(self, sat_dim=SAT_FEATURES, job_dim=JOB_FEATURES, edge_dim=EDGE_FEATURES, global_dim=GLOBAL_FEATURES, d=128, heads=4, blocks=2, ff=512, d_pointer=64, job_order="scores"):
         super().__init__()
         self.encoder = _Encoder(sat_dim, job_dim, global_dim, d, heads, blocks, ff, local=False)
         self.pointer = _Pointer(d, edge_dim, d_pointer)
+        self.job_order = job_order
 
     @property
     def value_head(self):
@@ -64,7 +65,7 @@ class OpsAttentionNet(nn.Module):
     def _run(self, obs, masks=None, deterministic=False, actions=None):
         h_s, h_j, edges, jobs, value = self.encoder(obs)
         picked, log_prob, entropy, logits = _match(
-            self.pointer, h_s, h_j, edges, jobs, masks, obs, deterministic, actions
+            self.pointer, h_s, h_j, edges, jobs, masks, obs, deterministic, actions, job_order=self.job_order
         )
         return picked, log_prob, entropy, logits, value
 
@@ -84,16 +85,17 @@ class OpsAttentionNet(nn.Module):
 class LocalActor(nn.Module):
     """Same decoder. Each satellite sees its row, the slots, its edges, and its neighbors."""
 
-    def __init__(self, sat_dim=SAT_FEATURES, job_dim=JOB_FEATURES, edge_dim=EDGE_FEATURES, global_dim=GLOBAL_FEATURES, neighbor_dim=NEIGHBOR_FEATURES, d=128, heads=4, blocks=2, ff=512, d_pointer=64):
+    def __init__(self, sat_dim=SAT_FEATURES, job_dim=JOB_FEATURES, edge_dim=EDGE_FEATURES, global_dim=GLOBAL_FEATURES, neighbor_dim=NEIGHBOR_FEATURES, d=128, heads=4, blocks=2, ff=512, d_pointer=64, job_order="scores"):
         super().__init__()
         self.encoder = _Encoder(
             sat_dim, job_dim, global_dim, d, heads, blocks, ff, local=True, neighbor_dim=neighbor_dim
         )
         self.pointer = _Pointer(d, edge_dim, d_pointer)
+        self.job_order = job_order
 
     def _run(self, obs, masks=None, deterministic=False, actions=None):
         h_s, h_j, edges, jobs, _ = self.encoder(obs)
-        return _match(self.pointer, h_s, h_j, edges, jobs, masks, obs, deterministic, actions)
+        return _match(self.pointer, h_s, h_j, edges, jobs, masks, obs, deterministic, actions, job_order=self.job_order)
 
     def forward(self, obs):
         return self._run(obs, deterministic=True)[3].flatten(1)
@@ -158,9 +160,11 @@ class _IdentityExtractor(nn.Module):
 class OpsAttentionPolicy(MaskableActorCriticPolicy):
     """MaskablePPO policy. `controller` is `dispatcher` or `ctde`; both decode satellites in order."""
 
-    def __init__(self, observation_space, action_space, lr_schedule, d=128, heads=4, blocks=2, ff=512, d_pointer=64, controller="dispatcher", **kwargs):
+    def __init__(self, observation_space, action_space, lr_schedule, d=128, heads=4, blocks=2, ff=512, d_pointer=64, controller="dispatcher", decoder_version="v1", **kwargs):
         self._controller = controller
-        self._net_cfg = dict(d=d, heads=heads, blocks=blocks, ff=ff, d_pointer=d_pointer)
+        job_order = "packed" if decoder_version == "v2" else "scores"
+        self._decoder_version = decoder_version
+        self._net_cfg = dict(d=d, heads=heads, blocks=blocks, ff=ff, d_pointer=d_pointer, job_order=job_order)
         kwargs.update(net_arch=[], ortho_init=False, features_extractor_class=_NullExtractor)
         super().__init__(observation_space, action_space, lr_schedule, **kwargs)
 
@@ -397,8 +401,8 @@ def _downlink_caps(obs, batch: int, device) -> torch.Tensor:
     return caps
 
 
-def _match(pointer, h_s, h_j, edges, jobs, masks, obs, deterministic=False, actions=None):
-    """Score every pair, then assign jobs in score order. Skip leaves a slot empty."""
+def _match(pointer, h_s, h_j, edges, jobs, masks, obs, deterministic=False, actions=None, job_order="scores"):
+    """Score every pair, then assign jobs. `packed` walks slots 0..K-1 so replay order is fixed."""
     b, n, _ = h_s.shape
     k = h_j.shape[1]
     device = h_s.device
@@ -424,9 +428,13 @@ def _match(pointer, h_s, h_j, edges, jobs, masks, obs, deterministic=False, acti
     job_priority = legal_pair.max(dim=1).values + 0.5 * prio
     job_priority = job_priority.masked_fill(~job_valid, _NEG)
 
-    # Order follows the current scores. After a weight update the same joint
-    # assignment can be factored in a different order. That replay gap stays open.
-    order = job_priority.argsort(dim=-1, descending=True)
+    # Score order follows the current pointer. After a weight update the same
+    # joint assignment can be factored in a different order (`v1` replay gap).
+    # Packed order is the slot index, independent of weights.
+    if job_order == "packed":
+        order = torch.arange(k, device=device, dtype=torch.long).unsqueeze(0).expand(b, k)
+    else:
+        order = job_priority.argsort(dim=-1, descending=True)
 
     free = sat_valid.clone()
     downs = torch.zeros(b, dtype=torch.long, device=device)

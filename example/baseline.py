@@ -238,6 +238,7 @@ class Options:
     workers: int = 1
     plots: bool = True
     smoke: bool = False
+    diagnose: bool = False
     # Tests only. A benchmark run always plays the whole shift.
     max_steps: int | None = None
 
@@ -611,7 +612,16 @@ def _run_task(task: tuple) -> dict:
     method_s: dict[str, float] = {}
     for name in opts.method_names():
         started = time.perf_counter()
-        row = play(make_method(name, _WORKER["models"]), cfg, work, seed, mode, tape, opts.max_steps)
+        row = play(
+            make_method(name, _WORKER["models"]),
+            cfg,
+            work,
+            seed,
+            mode,
+            tape,
+            opts.max_steps,
+            diagnose=bool(getattr(opts, "diagnose", False)),
+        )
         dt = time.perf_counter() - started
         method_s[name] = dt
         rows.append(row)
@@ -1181,11 +1191,11 @@ def check_checkpoint(model, model_path: Path, base: dict) -> dict:
     }
 
 
-def play(method, cfg: dict, work: Workload, seed: int, mode: str, tape: EventTape | None = None, max_steps: int | None = None) -> dict:
+def play(method, cfg: dict, work: Workload, seed: int, mode: str, tape: EventTape | None = None, max_steps: int | None = None, diagnose: bool = False) -> dict:
     """One full shift of one method. Returns one `episodes.csv` row."""
     scripted = copy.deepcopy(tape.events) if tape is not None else []
     env = make_env(cfg, work.events(live=tape is None), seed, scripted, max_steps)
-    probe = _Probe(env, method, tape)
+    probe = _Probe(env, method, tape, diagnose=diagnose)
     method.begin(work.n_sats, seed)
 
     started = time.perf_counter()
@@ -1205,6 +1215,7 @@ def play(method, cfg: dict, work: Workload, seed: int, mode: str, tape: EventTap
     row.update(probe.metrics())
     row.update(_env_diagnostics(env, result))
     row.update(method.diagnostics())
+    row.update(probe.diagnose_row(env, result))
     row["tape_delivered_ok"] = tape.delivered_hash(env.k) == row["arrivals_hash"] if tape is not None else None
     row["shift_wall_s"] = wall
     row["consistency_errors"] = ";".join(check_counts(row))
@@ -1214,7 +1225,7 @@ def play(method, cfg: dict, work: Workload, seed: int, mode: str, tape: EventTap
 class _Probe:
     """The actor `run_episode` calls. Times the decision and logs what the queue looked like."""
 
-    def __init__(self, env: OpsEnv, method, tape: EventTape | None) -> None:
+    def __init__(self, env: OpsEnv, method, tape: EventTape | None, diagnose: bool = False) -> None:
         self.env = env
         self.method = method
         self.arrival_step = tape.arrival_steps() if tape is not None else {}
@@ -1224,6 +1235,11 @@ class _Probe:
         self.known: list[int] = []
         self.invalid = 0
         self.leaks = 0
+        self._diagnose = None
+        if diagnose:
+            from example.diagnostics import ShiftDiagnose
+
+            self._diagnose = ShiftDiagnose()
 
     def __call__(self, obs: dict) -> np.ndarray:
         env = self.env
@@ -1242,9 +1258,26 @@ class _Probe:
         action = np.asarray(self.method.act(obs, env), dtype=np.int64)
         self.times.append(time.perf_counter() - started)
 
+        if self._diagnose is not None:
+            hung = None
+            if _is_rl_method(self.method.name):
+                hung, _info = hungarian_action(obs, TickView.from_env(env))
+            self._diagnose.on_tick(env, obs, action, hung)
+
         mask = np.asarray(obs["mask"], dtype=bool)
         self.invalid += int((~mask[np.arange(action.shape[0]), action]).sum())
         return action
+
+    def diagnose_row(self, env, result: dict) -> dict:
+        if self._diagnose is None:
+            return {}
+        from example.diagnostics import flatten_diagnose
+
+        report = self._diagnose.close(env)
+        report["revenue_per_productive_downlink_tick"] = (result.get("ops") or {}).get(
+            "revenue_per_productive_downlink_tick"
+        )
+        return flatten_diagnose(report)
 
     def _after_reset(self) -> dict:
         env = self.env
@@ -1948,6 +1981,11 @@ def parse(argv: list[str] | None = None) -> Options:
     )
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument("--smoke", action="store_true", help="seeds 0,1,2; results are marked preliminary")
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="per-shift matching diagnostics (rho, quantiles, Hungarian disagreement). Off by default",
+    )
     args = parser.parse_args(argv)
 
     methods = tuple(m.strip().lower() for m in args.methods.split(",") if m.strip())
@@ -1973,6 +2011,7 @@ def parse(argv: list[str] | None = None) -> Options:
         workers=_parse_workers(args.workers),
         plots=not args.no_plots,
         smoke=args.smoke,
+        diagnose=args.diagnose,
     )
     return opts
 

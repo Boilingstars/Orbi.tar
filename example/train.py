@@ -5,9 +5,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import subprocess
 import time
 from collections.abc import Generator
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -27,9 +30,9 @@ from example.agent import Ctde, Dispatcher, GreedyAgent
 from example.models import OpsAttentionPolicy, count_parameters, _NEG
 from example.plots import plot_run
 from orbi import load, resolve_scenario
-from orbi.env import N_MAX, EventConfig, OpsEnv
+from orbi.env import N_MAX, EventConfig, OpsEnv, digest
 from orbi.greedy import greedy_action
-from tools.evaluating import load_ppo, run_episode, shift_kwargs
+from tools.evaluating import run_episode, shift_kwargs
 from tools.training import Session, Trainer, launch
 
 
@@ -103,6 +106,15 @@ class PPOTrainer(Trainer):
     clip_range = 0.2
     vf_coef = 0.5
     max_grad_norm = 0.5
+    observation_version = "v1"
+    decoder_version = "v1"
+    reward_mode = "current_pbrs"
+    reward_beta = 1.0
+    kl_budget = "per_sat"
+    optimizer_resume_mode = "full"
+    experiment_id = None
+    entropy_end_coef = None
+    migrate_observation = False
 
 
 class _JointQ(nn.Module):
@@ -269,16 +281,29 @@ def _action_rows(model) -> int:
 class _PerSatPPO(MaskablePPO):
     """MaskablePPO with `target_kl` as a per-satellite budget, not the joint sum."""
 
+    kl_budget = "per_sat"
+    entropy_end_coef = None
+
     def train(self) -> None:
+        end = getattr(self, "entropy_end_coef", None)
+        if end is not None:
+            start = getattr(self, "_ent_coef_start", None)
+            if start is None:
+                self._ent_coef_start = float(self.ent_coef)
+                start = self._ent_coef_start
+            done = 1.0 - float(self._current_progress_remaining)
+            self.ent_coef = start + (float(end) - start) * done
+            self.logger.record("train/ent_coef", float(self.ent_coef))
         n = _action_rows(self)
-        per_sat = self.target_kl
-        if per_sat is not None:
-            self.target_kl = per_sat * n
+        stored = self.target_kl
+        if stored is not None and getattr(self, "kl_budget", "per_sat") != "joint":
+            self.target_kl = stored * n
         super().train()
-        self.target_kl = per_sat
+        self.target_kl = stored
         joint = self.logger.name_to_value.get("train/approx_kl")
         if joint is not None:
             self.logger.record("train/approx_kl_joint", float(joint))
+            self.logger.record("train/joint_approx_kl", float(joint))
             self.logger.record("train/approx_kl", float(joint) / n)
 
 
@@ -359,13 +384,22 @@ def mask_fn(env) -> np.ndarray:
     return env.unwrapped.action_masks()
 
 
-def _make_env(run, spec: dict, events: EventConfig, seed: int):
+def _make_env(run, spec: dict, events: EventConfig, seed: int, gamma: float):
     def _thunk():
+        from example.observation import observation_from_version
+        from example.reward import MyReward
+
         env = OpsEnv(
             scenario=spec,
             events=events,
             max_steps=run.max_steps,
             seed=seed,
+            reward=MyReward(
+                mode=getattr(run, "reward_mode", "current_pbrs"),
+                gamma=float(gamma),
+                beta=float(getattr(run, "reward_beta", 1.0)),
+            ),
+            observation=observation_from_version(getattr(run, "observation_version", "v1")),
             **shift_kwargs(run),
         )
         return ActionMasker(_ScaleReward(Monitor(env)), mask_fn)
@@ -400,6 +434,45 @@ def _restore_training_checkpoint(model: MaskablePPO, path: str) -> None:
         model._n_updates = int(data["_n_updates"])
     model._last_obs = None
     model._last_original_obs = None
+
+
+def _load_policy_weights(model: MaskablePPO, path: str, allow_widen: bool) -> None:
+    """Load policy tensors. Shape mismatches fail unless `allow_widen` copies into larger Linear inputs."""
+    from stable_baselines3.common.save_util import load_from_zip_file
+
+    from example.migrate import overlay_policy_weights
+
+    _data, params, _ = load_from_zip_file(str(path), device=model.device)
+    if not params or "policy" not in params:
+        raise FileNotFoundError(f"checkpoint has no policy weights: {path}")
+    overlay_policy_weights(model.policy, params["policy"], allow_widen=allow_widen)
+
+
+def _git_sha() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[1], text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _git_dirty() -> bool | None:
+    try:
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=Path(__file__).resolve().parents[1], text=True
+        )
+        return bool(status.strip())
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _file_sha256(path: str) -> str:
+    digest_hash = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest_hash.update(chunk)
+    return digest_hash.hexdigest()
 
 
 def _split_value_learning_rate(model: MaskablePPO, policy_lr: float, value_lr: float, extra_value=()) -> None:
@@ -465,14 +538,18 @@ def _build(session: Session, agent, algo) -> MaskablePPO:
 
     # One wrapped environment per worker. Events follow `Run`.
     events = EventConfig() if run.events else EventConfig.off()
-    thunks = [_make_env(run, spec, events, run.seed + i) for i in range(run.n_envs)]
+    thunks = [_make_env(run, spec, events, run.seed + i, gamma=float(trainer.gamma)) for i in range(run.n_envs)]
     vec = SubprocVecEnv if run.subproc and run.n_envs > 1 else DummyVecEnv
     env = vec(thunks)
     _widen_trainer_threads(_TRAINER_THREADS)
 
     # Shorter than the 288-tick shift so PPO updates more often.
     n_steps = _ROLLOUT_STEPS
-    policy_kwargs = dict(PROFILES[run.profile], controller=agent.controller)
+    policy_kwargs = dict(
+        PROFILES[run.profile],
+        controller=agent.controller,
+        decoder_version=getattr(run, "decoder_version", "v1"),
+    )
     model = algo(
         OpsAttentionPolicy,
         env,
@@ -482,19 +559,29 @@ def _build(session: Session, agent, algo) -> MaskablePPO:
         seed=run.seed,
         **{name: getattr(trainer, name) for name in _ALGO},
     )
+    model.kl_budget = getattr(run, "kl_budget", getattr(trainer, "kl_budget", "per_sat"))
+    model.entropy_end_coef = getattr(trainer, "entropy_end_coef", getattr(run, "entropy_end_coef", None))
 
     # Critic learning rate. MAPPO also puts the Q head in that group.
     extra = (model.q_head,) if isinstance(model, Mappo) else ()
     _split_value_learning_rate(model, trainer.learning_rate, trainer.value_learning_rate, extra)
 
     # Resume restores Adam moments. A weights-only `load` is a warm start on a fresh optimizer.
-    if run.resume and run.load:
+    resume_mode = getattr(run, "optimizer_resume_mode", "full")
+    migrate = bool(getattr(run, "migrate_observation", getattr(trainer, "migrate_observation", False)))
+    if run.resume and run.load and resume_mode == "full":
+        if migrate:
+            raise ValueError(
+                "cannot full-resume Adam across observation_v1->v2; "
+                "set optimizer_resume_mode='weights_only' or train a new model"
+            )
         _restore_training_checkpoint(model, run.load)
         print(f"Resumed weights and optimizer: {run.load} at {model.num_timesteps} steps", flush=True)
     elif run.load:
-        loaded = load_ppo(run.load)
-        model.policy.load_state_dict(loaded.policy.state_dict())
-        print(f"Starting weights: {run.load}", flush=True)
+        _load_policy_weights(model, run.load, allow_widen=migrate)
+        print(f"Starting weights ({resume_mode}{', migrate' if migrate else ''}): {run.load}", flush=True)
+        if run.resume and resume_mode != "full":
+            print("optimizer_resume_mode is not full: Adam is fresh", flush=True)
 
     session.notes.update(
         scenario=str(path),
@@ -507,6 +594,20 @@ def _build(session: Session, agent, algo) -> MaskablePPO:
         policy_parameters=count_parameters(model.policy.net),
         method=algo.__name__,
         agent=agent.__name__,
+        observation_version=getattr(run, "observation_version", "v1"),
+        decoder_version=getattr(run, "decoder_version", "v1"),
+        reward_mode=getattr(run, "reward_mode", "current_pbrs"),
+        reward_beta=float(getattr(run, "reward_beta", 1.0)),
+        reward_gamma=float(trainer.gamma),
+        ppo_gamma=float(trainer.gamma),
+        kl_budget=getattr(run, "kl_budget", "per_sat"),
+        optimizer_resume_mode=getattr(run, "optimizer_resume_mode", "full"),
+        migrate_observation=migrate,
+        experiment_id=getattr(run, "experiment_id", None),
+        git_sha=_git_sha(),
+        dirty_flag=_git_dirty(),
+        scenario_hash=digest(spec),
+        model_checkpoint_sha256=_file_sha256(run.load) if run.load else None,
     )
     model._horizon = n_steps
     session.callbacks = [_RolloutPing(), _GreedyAnchor(run)]

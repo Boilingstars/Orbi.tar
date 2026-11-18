@@ -88,6 +88,15 @@ class Run:
     save: str | None = None
     run_dir: str | None = None
     resume: bool = False
+    progress_bar: bool = True
+    observation_version: str = "v1"
+    decoder_version: str = "v1"
+    reward_mode: str = "current_pbrs"
+    reward_beta: float = 1.0
+    kl_budget: str = "per_sat"
+    optimizer_resume_mode: str = "full"
+    migrate_observation: bool = False
+    experiment_id: str | None = None
 
 
 def plateau_reached(
@@ -171,7 +180,7 @@ def launch(build, trainer: Trainer, plot=None):
             PlateauStopCallback(trainer),
             *extra,
         ],
-        progress_bar=True,
+        progress_bar=run.progress_bar,
         reset_num_timesteps=not run.resume,
     )
 

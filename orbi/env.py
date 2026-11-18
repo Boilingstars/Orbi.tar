@@ -225,13 +225,17 @@ class OpsEnv(gym.Env):
         self.calibrate_index = self.K + 1
 
         # One categorical per satellite: K job slots, idle, calibrate.
+        # Feature widths follow the observation class so v2 can widen tensors.
+        job_dim = int(getattr(self.observation, "job_features", JOB_FEATURES))
+        edge_dim = int(getattr(self.observation, "edge_features", EDGE_FEATURES))
+        edge_low, edge_high = (0.0, 1.0) if edge_dim <= EDGE_FEATURES else (-5.0, 5.0)
         self.action_space = gym.spaces.MultiDiscrete([self.K + 2] * self.N)
         self.observation_space = gym.spaces.Dict(
             {
                 "sats": gym.spaces.Box(-5.0, 5.0, (self.N, SAT_FEATURES), np.float32),
-                "jobs": gym.spaces.Box(-5.0, 5.0, (self.K, JOB_FEATURES), np.float32),
-                "plan": gym.spaces.Box(-5.0, 5.0, (PLAN_MAX, JOB_FEATURES), np.float32),
-                "edges": gym.spaces.Box(0.0, 1.0, (self.N, self.K, EDGE_FEATURES), np.float32),
+                "jobs": gym.spaces.Box(-5.0, 5.0, (self.K, job_dim), np.float32),
+                "plan": gym.spaces.Box(-5.0, 5.0, (PLAN_MAX, job_dim), np.float32),
+                "edges": gym.spaces.Box(edge_low, edge_high, (self.N, self.K, edge_dim), np.float32),
                 "neighbors": gym.spaces.Box(
                     -5.0, 5.0, (self.N, self.neighbor_memory, NEIGHBOR_FEATURES), np.float32
                 ),
