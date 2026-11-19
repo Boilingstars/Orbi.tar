@@ -1,0 +1,228 @@
+{
+  "options": {
+    "scenario": "p03",
+    "model": "experiments/runs/11_15_26_reward_pbrs_880k/checkpoints/ckpt_769024.zip",
+    "models": [
+      "experiments/runs/11_15_26_reward_pbrs_880k/checkpoints/ckpt_769024.zip",
+      "experiments/runs/11_17_26_reward_pbrs_1600k/checkpoints/ckpt_1159544.zip"
+    ],
+    "model_labels": [
+      "ckpt_769024",
+      "ckpt_1159544"
+    ],
+    "fleet_sizes": [
+      48
+    ],
+    "seeds": [
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "event_modes": [
+      "common"
+    ],
+    "rl_mode": "stochastic",
+    "rl_secondary": false,
+    "methods": [
+      "rl"
+    ],
+    "output": "experiments/benchmarks",
+    "into": null,
+    "workers": 5,
+    "plots": false,
+    "smoke": false,
+    "diagnose": false,
+    "max_steps": null,
+    "method_names": [
+      "RL_ckpt_769024",
+      "RL_ckpt_1159544"
+    ]
+  },
+  "scenario_id": "P03_energy",
+  "scenario_sha256": "4b0b09351cb6c8a0ee3a23e59f6d8b93cd4a558c325487856b36fb784550c5b8",
+  "constants": {
+    "N_MAX": 48,
+    "TOP_K": 64,
+    "SHIFT_STEPS": 288,
+    "STEP_S": 300,
+    "REFERENCE_SATS": 48,
+    "INITIAL_JOBS_PER_SAT": 5,
+    "BASE_POOL_MIN": 200,
+    "BASE_POOL_MAX": 350,
+    "BASE_ADDED_JOBS_MIN": 16,
+    "BASE_ADDED_JOBS_MAX": 28,
+    "BASE_OUTAGE_SATS": [
+      1,
+      3
+    ],
+    "HUNGARIAN_TIE_SOC": 0.0001,
+    "HUNGARIAN_TIE_HOLDER": 0.001,
+    "RL_POLICY_SEED": 7919,
+    "PRELIMINARY_SEEDS": 10,
+    "BOOTSTRAP_SAMPLES": 10000,
+    "BOOTSTRAP_SEED": 20261113
+  },
+  "shift_settings": {
+    "top_k": 64,
+    "baseline_repair": false,
+    "neighbor_method": "competitors",
+    "neighbor_memory": 12,
+    "ground_points": 64,
+    "ground_region": "world",
+    "job_difficulty": 0.15
+  },
+  "workload": {
+    "48": {
+      "n_sats": 48,
+      "initial_jobs": 240,
+      "pool_min": 200,
+      "pool_max": 350,
+      "add_min": 16,
+      "add_max": 28,
+      "downlink_limit": 6,
+      "outage_sats": [
+        1,
+        3
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    }
+  },
+  "fleets": {
+    "48": {
+      "satellites": [
+        "S01",
+        "S02",
+        "S03",
+        "S04",
+        "S05",
+        "S06",
+        "S07",
+        "S08",
+        "S09",
+        "S10",
+        "S11",
+        "S12",
+        "S13",
+        "S14",
+        "S15",
+        "S16",
+        "S17",
+        "S18",
+        "S19",
+        "S20",
+        "S21",
+        "S22",
+        "S23",
+        "S24",
+        "S25",
+        "S26",
+        "S27",
+        "S28",
+        "S29",
+        "S30",
+        "S31",
+        "S32",
+        "S33",
+        "S34",
+        "S35",
+        "S36",
+        "S37",
+        "S38",
+        "S39",
+        "S40",
+        "S41",
+        "S42",
+        "S43",
+        "S44",
+        "S45",
+        "S46",
+        "S47",
+        "S48"
+      ],
+      "plane_counts": [
+        8,
+        8,
+        8,
+        8,
+        8,
+        8
+      ]
+    }
+  },
+  "models": [
+    {
+      "path": "/root/Orbi.tar/experiments/runs/11_15_26_reward_pbrs_880k/checkpoints/ckpt_769024.zip",
+      "sha256": "11a44646bf0cec21aa29d77b5e5eb2d40a59c4cf8c129b548aa120ea301db60b",
+      "controller": "dispatcher",
+      "policy_class": "OpsAttentionPolicy",
+      "parameters": 1659975,
+      "device": "cpu",
+      "training_config": "experiments/runs/11_15_26_reward_pbrs_880k/config.json",
+      "training_scenario": "P03_energy",
+      "training_n_satellites": 48,
+      "training_events": true,
+      "warnings": [],
+      "label": "ckpt_769024"
+    },
+    {
+      "path": "/root/Orbi.tar/experiments/runs/11_17_26_reward_pbrs_1600k/checkpoints/ckpt_1159544.zip",
+      "sha256": "7643fba46a91631648eda39c1afd0f5fc9fbf081908b6fb7bf2fb5bbf2d8c191",
+      "controller": "dispatcher",
+      "policy_class": "OpsAttentionPolicy",
+      "parameters": 1659975,
+      "device": "cpu",
+      "training_config": "experiments/runs/11_17_26_reward_pbrs_1600k/config.json",
+      "training_scenario": "P03_energy",
+      "training_n_satellites": 48,
+      "training_events": true,
+      "warnings": [],
+      "label": "ckpt_1159544"
+    }
+  ],
+  "model": {
+    "path": "/root/Orbi.tar/experiments/runs/11_15_26_reward_pbrs_880k/checkpoints/ckpt_769024.zip",
+    "sha256": "11a44646bf0cec21aa29d77b5e5eb2d40a59c4cf8c129b548aa120ea301db60b",
+    "controller": "dispatcher",
+    "policy_class": "OpsAttentionPolicy",
+    "parameters": 1659975,
+    "device": "cpu",
+    "training_config": "experiments/runs/11_15_26_reward_pbrs_880k/config.json",
+    "training_scenario": "P03_energy",
+    "training_n_satellites": 48,
+    "training_events": true,
+    "warnings": [],
+    "label": "ckpt_769024"
+  },
+  "host": {
+    "python": "3.14.4",
+    "platform": "Linux-7.0.0-43-generic-x86_64-with-glibc2.43",
+    "cpu_count": 6,
+    "mem_available_mb": 4391,
+    "load_average": [
+      2.67822265625,
+      3.806640625,
+      2.466796875
+    ]
+  },
+  "versions": {
+    "numpy": "2.5.4",
+    "scipy": "1.18.1",
+    "torch": "2.15.0+cpu",
+    "stable_baselines3": "2.9.2",
+    "sb3_contrib": "2.9.2",
+    "gymnasium": "1.4.0",
+    "matplotlib": "3.11.2"
+  },
+  "git": {
+    "commit": "2563d3e23facad8ea246fdc64bd2ffd2ec679e61",
+    "branch": "example",
+    "dirty": true
+  }
+}

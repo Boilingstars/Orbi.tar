@@ -1,0 +1,38 @@
+benchmark: 5 tasks x 2 methods, 5 workers (auto cpu=6 mem_available=4173MB per_worker~380MB models=2) -> experiments/benchmarks/benchmark_20261118_131851
+worker pid=54705 loading ckpt_769024
+worker pid=54706 loading ckpt_769024
+worker pid=54702 loading ckpt_769024
+worker pid=54703 loading ckpt_769024
+worker pid=54704 loading ckpt_769024
+worker pid=54706 loading ckpt_1159544
+worker pid=54705 loading ckpt_1159544
+worker pid=54703 loading ckpt_1159544
+worker pid=54702 loading ckpt_1159544
+worker pid=54704 loading ckpt_1159544
+    common N=48 seed=14 tape 82.9s
+    common N=48 seed=12 tape 83.9s
+    common N=48 seed=10 tape 86.7s
+    common N=48 seed=11 tape 87.1s
+    common N=48 seed=13 tape 88.6s
+    common N=48 seed=12 RL_ckpt_769024 190.6s
+    common N=48 seed=14 RL_ckpt_769024 191.5s
+    common N=48 seed=10 RL_ckpt_769024 190.9s
+    common N=48 seed=11 RL_ckpt_769024 232.8s
+    common N=48 seed=13 RL_ckpt_769024 240.7s
+    common N=48 seed=12 RL_ckpt_1159544 189.8s
+  [1/5] common N=48 seed=12 task=464.3s RL_ckpt_769024=190.6s RL_ckpt_1159544=189.8s  elapsed 7.8 min  ETA 31.2 min  remaining 4
+    common N=48 seed=14 RL_ckpt_1159544 193.2s
+  [2/5] common N=48 seed=14 task=467.6s RL_ckpt_769024=191.5s RL_ckpt_1159544=193.2s  elapsed 7.9 min  ETA 11.8 min  remaining 3
+    common N=48 seed=10 RL_ckpt_1159544 190.8s
+  [3/5] common N=48 seed=10 task=468.4s RL_ckpt_769024=190.9s RL_ckpt_1159544=190.8s  elapsed 7.9 min  ETA 5.2 min  remaining 2
+    common N=48 seed=11 RL_ckpt_1159544 238.7s
+  [4/5] common N=48 seed=11 task=558.5s RL_ckpt_769024=232.8s RL_ckpt_1159544=238.7s  elapsed 9.4 min  ETA 2.3 min  remaining 1
+    common N=48 seed=13 RL_ckpt_1159544 243.3s
+  [5/5] common N=48 seed=13 task=572.6s RL_ckpt_769024=240.7s RL_ckpt_1159544=243.3s  elapsed 9.6 min  ETA 0.0 min  remaining 0
+
+== event mode: common, 5 seeds (PRELIMINARY) ==
+  N  method                                completed         revenue, USD    USD / completed           missed
+-------------------------------------------------------------------------------------------------------------
+ 48  RL (ckpt_769024, stochastic)     1273.6 +- 42.5      7394.9 +- 393.2         5.8 +- 0.2   1286.6 +- 66.4
+ 48  RL (ckpt_1159544, stochastic)    1272.2 +- 45.6      7373.1 +- 395.8         5.8 +- 0.2   1288.0 +- 74.8
+results: experiments/benchmarks/benchmark_20261118_131851

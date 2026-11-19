@@ -1,0 +1,8 @@
+Screening only. Seeds 10–14 on common tapes, N=48.
+Not the official validation set (seeds 0,1,2 live in benchmark_20261117_155045).
+
+ckpt_769024  mean revenue $7394.9
+ckpt_1159544 mean revenue $7373.1
+paired Δ (769024 − 1159544) = +$21.86 / shift, 4 wins / 1 loss.
+
+Fine-tune start: ckpt_769024.

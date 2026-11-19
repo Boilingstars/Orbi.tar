@@ -57,9 +57,10 @@ ENTROPY_END = 0.008
 _REWARD_SCALE = 100.0
 
 # Eight env workers, as in the original launch. Trainer threads apply after spawn.
+# ORBI_TRAINER_THREADS overrides the parent intra-op count when two jobs share a host.
 _N_ENVS = 8
 _ROLLOUT_STEPS = 128
-_TRAINER_THREADS = 4
+_TRAINER_THREADS = int(os.environ.get("ORBI_TRAINER_THREADS", "4"))
 
 
 class _ScaleReward(gym.RewardWrapper):

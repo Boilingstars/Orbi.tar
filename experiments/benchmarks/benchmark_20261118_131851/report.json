@@ -1,0 +1,248 @@
+{
+  "title": "Greedy vs Hungarian + capacity repair vs RL checkpoints on P03 fleet subsets",
+  "created": "2026-11-18T13:28:40",
+  "status": "preliminary",
+  "n_seeds": 5,
+  "seeds": [
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "fleet_sizes": [
+    48
+  ],
+  "primary_event_mode": "common",
+  "event_modes": [
+    "common"
+  ],
+  "primary_rl_mode": "RL_ckpt_769024",
+  "methods": {
+    "RL_ckpt_769024": "RL (ckpt_769024, stochastic)",
+    "RL_ckpt_1159544": "RL (ckpt_1159544, stochastic)"
+  },
+  "notes": [
+    "Common event tape is the primary mode: for each (N, seed) the initial catalog, arrivals, and outages are identical for every method; the tape hash is stored per episode.",
+    "The tape's pool cap uses a virtual queue in which offered jobs never complete, and outages may hit any satellite; native mode instead caps on the live queue and spares busy satellites.",
+    "Native mode shares seeds and parameters only: later arrivals and outages depend on each policy's decisions, so it is not a comparison on an identical job set.",
+    "Hungarian + capacity repair solves a one-tick assignment. It is not a whole-shift planner, and with the repair it is not an exact solution of the capped one-tick problem.",
+    "Greedy reads env.downlink_limit on every tick after reset (n_sats // 8), not the scenario's initial value.",
+    "Primary RL mode is RL_ckpt_769024, fixed before the run.",
+    "RL checkpoints compared on the same tapes: ckpt_769024 (ckpt_769024.zip), ckpt_1159544 (ckpt_1159544.zip).",
+    "RL was trained on 48 satellites; N < 48 is zero-shot transfer, so a drop there may come from the shifted observation distribution.",
+    "Only 5 seeds: all tables and plots are preliminary."
+  ],
+  "metric_definitions": {
+    "completed": "completed_step is set and completed_step <= deadline_step",
+    "due": "deadline_step <= env.k at shift end (the denominator of every completion and miss rate, per kind)",
+    "missed": "due and completed_step is None",
+    "pending_with_future_deadline": "not completed and deadline_step > env.k (never counted as missed)",
+    "revenue_usd": "sum of simulator value_usd over completed jobs; no PRICE_DIV rescaling",
+    "revenue_per_completed_job": "revenue_usd / completed_total; null when nothing completed",
+    "q_selection": "mean value of completed jobs / mean value of due jobs, per kind",
+    "per_satellite": "absolute metric / n_sats (revenue, completed, missed)",
+    "downlink_capacity_utilization": "executed downlink ticks / (downlink_limit * ticks)",
+    "decision_ms": "wall time of the method call only (no env.step, no observation); first tick excluded as warm-up",
+    "ci95": "t-interval of the mean over seeds; paired deltas use a percentile bootstrap over seeds"
+  },
+  "hungarian": {
+    "label": "Hungarian + capacity repair",
+    "weight": "w_ij = value_usd_j / T_ij + 1e-4 * soc_i + 1e-3 * [i executed j last tick]",
+    "T_ij": "relay: remaining_steps; downlink: remaining_steps for the current holder, else work_steps",
+    "tie_soc": 0.0001,
+    "tie_holder": 0.001,
+    "idle_columns": "one zero-weight idle column per satellite; only pairs with w > 0 and mask = 1 can be chosen",
+    "capacity_repair": "keep the downlink_limit heaviest downlinks, then rerun the assignment for every other satellite over relay slots",
+    "calibration": "idle satellites calibrate when allowed and calibration age >= 0.85 of validity (greedy rule)",
+    "repair_ticks_mean": {},
+    "repair_dropped_mean": {}
+  },
+  "checks": {
+    "common_tape_identical_across_methods": true,
+    "initial_catalog_identical_across_methods": true,
+    "native_tasks_with_diverging_arrivals": 0,
+    "counter_consistency_errors": 0,
+    "future_event_leaks": 0,
+    "invalid_actions": 0,
+    "env_ground_capacity_rejections": {
+      "RL_ckpt_769024": 0,
+      "RL_ckpt_1159544": 0
+    },
+    "env_duplicate_job_rejections": {
+      "RL_ckpt_769024": 0,
+      "RL_ckpt_1159544": 0
+    },
+    "workload_after_reset_ok": true,
+    "greedy_downlink_limit_ok": true,
+    "full_shifts": true
+  },
+  "timing": {
+    "device": "cpu",
+    "workers": 5,
+    "torch_threads_per_worker": 1,
+    "method": "time.perf_counter around the method call; RL includes tensor conversion and decoding, Hungarian includes building its tick view",
+    "warmup": "the first decision of each shift is excluded and stored as decision_ms_first",
+    "load_average_at_start": [
+      2.67822265625,
+      3.806640625,
+      2.466796875
+    ],
+    "decision_ms_mean": {
+      "RL_ckpt_769024": {
+        "common/48": 75.44022830118399
+      },
+      "RL_ckpt_1159544": {
+        "common/48": 76.26044285155709
+      }
+    }
+  },
+  "main_table": [
+    {
+      "event_mode": "common",
+      "n_sats": 48,
+      "method": "RL_ckpt_769024",
+      "label": "RL (ckpt_769024, stochastic)",
+      "completed_total": {
+        "n": 5,
+        "mean": 1273.6,
+        "std": 34.23886680367795,
+        "median": 1276.0,
+        "ci95_low": 1231.086831750579,
+        "ci95_high": 1316.1131682494208
+      },
+      "revenue_usd": {
+        "n": 5,
+        "mean": 7394.909999999999,
+        "std": 316.7008371476146,
+        "median": 7300.56,
+        "ci95_low": 7001.673972312813,
+        "ci95_high": 7788.146027687185
+      },
+      "revenue_per_completed_job": {
+        "n": 5,
+        "mean": 5.804959210217367,
+        "std": 0.13044793171635913,
+        "median": 5.850355125100888,
+        "ci95_low": 5.6429867097650215,
+        "ci95_high": 5.966931710669713
+      },
+      "missed_total": {
+        "n": 5,
+        "mean": 1286.6,
+        "std": 53.47242279904661,
+        "median": 1295.0,
+        "ci95_low": 1220.2052177136936,
+        "ci95_high": 1352.9947822863062
+      }
+    },
+    {
+      "event_mode": "common",
+      "n_sats": 48,
+      "method": "RL_ckpt_1159544",
+      "label": "RL (ckpt_1159544, stochastic)",
+      "completed_total": {
+        "n": 5,
+        "mean": 1272.2,
+        "std": 36.73826343201322,
+        "median": 1258.0,
+        "ci95_low": 1226.5834209399434,
+        "ci95_high": 1317.8165790600567
+      },
+      "revenue_usd": {
+        "n": 5,
+        "mean": 7373.053999999999,
+        "std": 318.7797690098919,
+        "median": 7305.19,
+        "ci95_low": 6977.2366374647045,
+        "ci95_high": 7768.871362535294
+      },
+      "revenue_per_completed_job": {
+        "n": 5,
+        "mean": 5.7945410751353545,
+        "std": 0.14028398378168166,
+        "median": 5.843064516129032,
+        "ci95_low": 5.62035550294904,
+        "ci95_high": 5.968726647321669
+      },
+      "missed_total": {
+        "n": 5,
+        "mean": 1288.0,
+        "std": 60.203820476777054,
+        "median": 1295.0,
+        "ci95_low": 1213.2470835596635,
+        "ci95_high": 1362.7529164403365
+      }
+    }
+  ],
+  "paired_deltas_main": [
+    {
+      "event_mode": "common",
+      "n_sats": 48,
+      "comparison": "RL_ckpt_769024 - RL_ckpt_1159544",
+      "role": "primary",
+      "metric": "completed_total",
+      "n_pairs": 5,
+      "mean_delta": 1.4,
+      "std_delta": 9.6591925128346,
+      "median_delta": -1.0,
+      "wins": 1,
+      "losses": 3,
+      "ties": 1,
+      "bootstrap_ci95_low": -4.404999999999996,
+      "bootstrap_ci95_high": 10.2,
+      "preliminary": true
+    },
+    {
+      "event_mode": "common",
+      "n_sats": 48,
+      "comparison": "RL_ckpt_769024 - RL_ckpt_1159544",
+      "role": "primary",
+      "metric": "revenue_usd",
+      "n_pairs": 5,
+      "mean_delta": 21.856000000000314,
+      "std_delta": 33.68974591771192,
+      "median_delta": 5.039999999999964,
+      "wins": 4,
+      "losses": 1,
+      "ties": 0,
+      "bootstrap_ci95_low": 0.4320000000005166,
+      "bootstrap_ci95_high": 51.494000000000234,
+      "preliminary": true
+    },
+    {
+      "event_mode": "common",
+      "n_sats": 48,
+      "comparison": "RL_ckpt_769024 - RL_ckpt_1159544",
+      "role": "primary",
+      "metric": "revenue_per_completed_job",
+      "n_pairs": 5,
+      "mean_delta": 0.010418135082013258,
+      "std_delta": 0.019374986919080142,
+      "median_delta": 0.01732179944623624,
+      "wins": 4,
+      "losses": 1,
+      "ties": 0,
+      "bootstrap_ci95_low": -0.006140087955253471,
+      "bootstrap_ci95_high": 0.02312957810436984,
+      "preliminary": true
+    },
+    {
+      "event_mode": "common",
+      "n_sats": 48,
+      "comparison": "RL_ckpt_769024 - RL_ckpt_1159544",
+      "role": "primary",
+      "metric": "missed_total",
+      "n_pairs": 5,
+      "mean_delta": -1.4,
+      "std_delta": 9.6591925128346,
+      "median_delta": 1.0,
+      "wins": 3,
+      "losses": 1,
+      "ties": 1,
+      "bootstrap_ci95_low": -10.2,
+      "bootstrap_ci95_high": 4.6,
+      "preliminary": true
+    }
+  ]
+}

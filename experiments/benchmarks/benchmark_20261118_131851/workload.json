@@ -1,0 +1,218 @@
+{
+  "48": {
+    "target": {
+      "n_sats": 48,
+      "initial_jobs": 240,
+      "pool_min": 200,
+      "pool_max": 350,
+      "add_min": 16,
+      "add_max": 28,
+      "downlink_limit": 6,
+      "outage_sats": [
+        1,
+        3
+      ],
+      "outage_len": [
+        2,
+        8
+      ],
+      "p_add_jobs": 1.0,
+      "p_outage": 0.05
+    },
+    "satellites": [
+      "S01",
+      "S02",
+      "S03",
+      "S04",
+      "S05",
+      "S06",
+      "S07",
+      "S08",
+      "S09",
+      "S10",
+      "S11",
+      "S12",
+      "S13",
+      "S14",
+      "S15",
+      "S16",
+      "S17",
+      "S18",
+      "S19",
+      "S20",
+      "S21",
+      "S22",
+      "S23",
+      "S24",
+      "S25",
+      "S26",
+      "S27",
+      "S28",
+      "S29",
+      "S30",
+      "S31",
+      "S32",
+      "S33",
+      "S34",
+      "S35",
+      "S36",
+      "S37",
+      "S38",
+      "S39",
+      "S40",
+      "S41",
+      "S42",
+      "S43",
+      "S44",
+      "S45",
+      "S46",
+      "S47",
+      "S48"
+    ],
+    "plane_counts": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+    ],
+    "after_reset": {
+      "common": {
+        "downlink_limit": [
+          6
+        ],
+        "initial_jobs": [
+          240
+        ],
+        "events_pool": [
+          "200-350"
+        ],
+        "events_add_jobs_count": [
+          "16-28"
+        ],
+        "events_outage_sats": [
+          "1-3"
+        ],
+        "events_p_add_jobs": [
+          0.0
+        ],
+        "events_p_outage": [
+          0.0
+        ]
+      }
+    },
+    "tapes": [
+      {
+        "n_sats": 48,
+        "seed": 12,
+        "tape_hash": "ab38788877ed0bfa08cf955c4a77a5e3b8726a99b89fd44c3d9b8226ec2fa48c",
+        "initial_hash": "ae79edb01b99f057d90455f66d130539bf15208ba80a55d2ad04276bb56a7fd2",
+        "arrivals_hash": "bd31cbc0eb5bcd96fca0f62e3aab5175d1a2c6ee4fbdd5abf90302674d65b936",
+        "initial_jobs": 240,
+        "add_events": 287,
+        "offered_jobs": 2272,
+        "offered_relay": 673,
+        "offered_downlink": 1599,
+        "outage_events": 7,
+        "outage_satellites": 15,
+        "outage_satellite_ticks": 88,
+        "virtual_open_queue_mean": 347.68402777777777,
+        "virtual_open_queue_max": 350,
+        "record_s": 83.65351977499085
+      },
+      {
+        "n_sats": 48,
+        "seed": 14,
+        "tape_hash": "358af0f9720c40c4c1e3a944d8a2b1053867475be2cff08c9ad65812c8207618",
+        "initial_hash": "e472e9edaf9e952b9410eaac0820ccc12e06135aa414f6e8231cc731e4ff58ea",
+        "arrivals_hash": "77c42d4b2b0f683cdc6048575922aa2a5b6761d5f15b6a2d6f7f5a1b8671724f",
+        "initial_jobs": 240,
+        "add_events": 286,
+        "offered_jobs": 2352,
+        "offered_relay": 674,
+        "offered_downlink": 1678,
+        "outage_events": 14,
+        "outage_satellites": 31,
+        "outage_satellite_ticks": 137,
+        "virtual_open_queue_mean": 347.6770833333333,
+        "virtual_open_queue_max": 350,
+        "record_s": 82.64080257399473
+      },
+      {
+        "n_sats": 48,
+        "seed": 10,
+        "tape_hash": "21f410ba96758a4667df6717dbbdfd55d6b8c06fef2e77349ce6ba1653f0fb6e",
+        "initial_hash": "8674dc73fbc7d29c222e2a21e7f30eca3d291b4aec6e6b2a08414c494f9572aa",
+        "arrivals_hash": "88c2c1228241ba25f19049c73ecc8cbcd2899b90f4d737569420980077959d2c",
+        "initial_jobs": 240,
+        "add_events": 285,
+        "offered_jobs": 2390,
+        "offered_relay": 758,
+        "offered_downlink": 1632,
+        "outage_events": 12,
+        "outage_satellites": 21,
+        "outage_satellite_ticks": 108,
+        "virtual_open_queue_mean": 347.87152777777777,
+        "virtual_open_queue_max": 350,
+        "record_s": 86.46941815099854
+      },
+      {
+        "n_sats": 48,
+        "seed": 11,
+        "tape_hash": "239d6200e34861bec149105cfd45c79f76fc69353144b648c259e2f1c1cc9594",
+        "initial_hash": "325a80efb674b2fa713b23de08cf1b72c217afe4bb2b9e25be1dde21df60fb2d",
+        "arrivals_hash": "36f6f18444e6836430960cdd14634570e10cab7ef513d8dbc4c4f982f3b720d6",
+        "initial_jobs": 240,
+        "add_events": 284,
+        "offered_jobs": 2289,
+        "offered_relay": 689,
+        "offered_downlink": 1600,
+        "outage_events": 12,
+        "outage_satellites": 21,
+        "outage_satellite_ticks": 85,
+        "virtual_open_queue_mean": 346.97569444444446,
+        "virtual_open_queue_max": 350,
+        "record_s": 86.82119284301007
+      },
+      {
+        "n_sats": 48,
+        "seed": 13,
+        "tape_hash": "46a7016d8c7defb76274b26e60b05b0e0fe8462c72e330f18f64cdab228862ae",
+        "initial_hash": "01053bba2991a0e40c627b132069a42b126fb8de2968daeb657b13940a06c339",
+        "arrivals_hash": "847b1572910bc395487deac5fc71744be203a6d5fc647e52ae7b6b831a0824dd",
+        "initial_jobs": 240,
+        "add_events": 287,
+        "offered_jobs": 2298,
+        "offered_relay": 698,
+        "offered_downlink": 1600,
+        "outage_events": 18,
+        "outage_satellites": 35,
+        "outage_satellite_ticks": 192,
+        "virtual_open_queue_mean": 347.7916666666667,
+        "virtual_open_queue_max": 350,
+        "record_s": 88.328499870011
+      }
+    ],
+    "realised_mean": {
+      "common/RL_ckpt_769024": {
+        "jobs_generated_total": 2560.2,
+        "arrivals_jobs": 2320.2,
+        "active_queue_mean": 43.80069444444444,
+        "known_queue_mean": 305.3173611111111,
+        "executable_jobs_mean": 14.395138888888889,
+        "executable_outside_k_mean": 0.33125,
+        "events_outage": 12.6
+      },
+      "common/RL_ckpt_1159544": {
+        "jobs_generated_total": 2560.2,
+        "arrivals_jobs": 2320.2,
+        "active_queue_mean": 43.88541666666667,
+        "known_queue_mean": 305.4020833333333,
+        "executable_jobs_mean": 14.452083333333334,
+        "executable_outside_k_mean": 0.3354166666666667,
+        "events_outage": 12.6
+      }
+    }
+  }
+}
